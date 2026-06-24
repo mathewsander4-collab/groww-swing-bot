@@ -1,0 +1,20 @@
+config.py
+
+# Sensitive files - never upload these
+data/groww_token.json
+data/swingbot-credentials.json
+data/open_positions.json
+data/*.json
+
+# Cache and generated files
+cache/
+data/*.csv
+data/*.txt
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Keep data folder structure
+!data/.gitkeep
+!cache/.gitkeep
