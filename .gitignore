@@ -1,4 +1,3 @@
-config.py
 
 # Sensitive files - never upload these
 data/groww_token.json
