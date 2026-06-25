@@ -1,6 +1,6 @@
 """
 Market sentiment filter — checks market conditions before placing any trades.
-Uses NSE India data (already installed) for VIX, Nifty, FII, A/D ratio.
+Uses Groww API (listIndices) for VIX and Nifty data.
 
 Scoring system:
   Green   = +1
@@ -15,42 +15,50 @@ Total score:
 import os
 from datetime import datetime
 
-from nse import NSE
-
 import config
 
 # Thresholds
-VIX_GREEN    = 18.0   # below this = green
-VIX_RED      = 22.0   # above this = skip
-NIFTY_GREEN  = -0.3   # above this % = green
-NIFTY_RED    = -0.8   # below this % = skip
-FII_RED      = -2000  # crores, below this = skip
-AD_GREEN     = 1.5    # above this = green
-AD_RED       = 0.8    # below this = skip
-GAP_DOWN_RED = -2.0   # % gap down = skip that stock
+VIX_GREEN    = 18.0
+VIX_RED      = 22.0
+NIFTY_GREEN  = -0.3
+NIFTY_RED    = -0.8
+FII_RED      = -2000
+AD_GREEN     = 1.5
+AD_RED       = 0.8
+GAP_DOWN_RED = -2.0
 
 
-def get_nse() -> NSE:
-    download_dir = os.path.join(config.DATA_DIR, "nse_downloads")
-    os.makedirs(download_dir, exist_ok=True)
-    return NSE(download_dir)
+def get_indices() -> list:
+    """Fetch all indices from Groww API."""
+    try:
+        from groww_client import GrowwClient
+        client = GrowwClient()
+        return client.listIndices() or []
+    except Exception as e:
+        print(f"[SENTIMENT] listIndices failed: {e}")
+        return []
 
 
-def check_vix(nse: NSE) -> tuple:
+def find_index(indices: list, name: str) -> dict:
+    """Find an index by partial name match."""
+    name_upper = name.upper()
+    for idx in indices:
+        idx_name = str(idx.get("indexName", "") or idx.get("index", "") or idx.get("name", "")).upper()
+        if name_upper in idx_name:
+            return idx
+    return {}
+
+
+def check_vix(indices: list) -> tuple:
     """Check India VIX fear index."""
     try:
-        data = nse.equityQuote("INDIAVIX")
-        vix = float(data.get("close", 0) or data.get("open", 0))
-        if vix == 0:
-            # Try indices
-            indices = nse.listIndices()
-            for idx in indices:
-                if "VIX" in str(idx.get("index", "")):
-                    vix = float(idx.get("last", 0))
-                    break
+        idx = find_index(indices, "VIX")
+        if not idx:
+            return 0, "VIX: Not found in indices — skipping check"
 
+        vix = float(idx.get("last", 0) or idx.get("lastPrice", 0) or idx.get("close", 0))
         if vix == 0:
-            return 0, f"VIX: Could not fetch (skipping check)"
+            return 0, "VIX: Could not read value — skipping check"
 
         if vix < VIX_GREEN:
             return 1, f"VIX: {vix:.1f} ✅ Calm market"
@@ -62,22 +70,16 @@ def check_vix(nse: NSE) -> tuple:
         return 0, f"VIX: Error ({e}) — skipping check"
 
 
-def check_nifty(nse: NSE) -> tuple:
-    """Check Nifty 500 opening trend."""
+def check_nifty(indices: list) -> tuple:
+    """Check Nifty 50 trend."""
     try:
-        data = nse.equityQuote("NIFTY 500")
-        if not data:
-            # Try Nifty 50
-            indices = nse.listIndices()
-            nifty = next((i for i in indices if i.get("index") == "NIFTY 50"), None)
-            if nifty:
-                change_pct = float(nifty.get("percentChange", 0))
-            else:
-                return 0, "Nifty: Could not fetch — skipping check"
-        else:
-            close      = float(data.get("close", 0))
-            open_      = float(data.get("open", 0))
-            change_pct = ((close - open_) / open_ * 100) if open_ else 0
+        idx = find_index(indices, "NIFTY 50")
+        if not idx:
+            idx = find_index(indices, "NIFTY50")
+        if not idx:
+            return 0, "Nifty: Not found in indices — skipping check"
+
+        change_pct = float(idx.get("percentChange", 0) or idx.get("pChange", 0) or 0)
 
         if change_pct >= NIFTY_GREEN:
             return 1, f"Nifty: {change_pct:+.2f}% ✅ Positive/flat"
@@ -89,51 +91,24 @@ def check_nifty(nse: NSE) -> tuple:
         return 0, f"Nifty: Error ({e}) — skipping check"
 
 
-def check_fii(nse: NSE) -> tuple:
-    """Check previous day's FII net activity."""
+def check_fii(indices: list) -> tuple:
+    """FII data not available via Groww indices — skip with neutral score."""
+    return 0, "FII: Not available via Groww API — skipping check"
+
+
+def check_advance_decline(indices: list) -> tuple:
+    """Estimate A/D ratio from index breadth if available, else skip."""
     try:
-        data = nse.advanceDecline()
-        # FII data might be in a separate endpoint
-        # Try to get from market stats
-        fii_net = None
+        # Some brokers return advances/declines in index data
+        nifty500 = find_index(indices, "NIFTY 500")
+        if not nifty500:
+            return 0, "A/D: Data not available — skipping check"
 
-        # advanceDecline sometimes includes FII data
-        if isinstance(data, dict):
-            fii_net = data.get("fiiNetActivity") or data.get("fii_net")
+        advances = float(nifty500.get("advances", 0) or 0)
+        declines = float(nifty500.get("declines", 0) or 0)
 
-        if fii_net is None:
-            return 0, "FII: Data not available — skipping check"
-
-        fii_net = float(fii_net)
-        if fii_net >= 0:
-            return 1, f"FII: ₹{fii_net:,.0f} Cr ✅ Net buyers"
-        elif fii_net >= FII_RED:
-            return 0, f"FII: ₹{fii_net:,.0f} Cr ⚠️ Mild selling — caution"
-        else:
-            return -2, f"FII: ₹{fii_net:,.0f} Cr ❌ Heavy selling — skip trades"
-    except Exception as e:
-        return 0, f"FII: Error ({e}) — skipping check"
-
-
-def check_advance_decline(nse: NSE) -> tuple:
-    """Check advance/decline ratio — how many stocks are up vs down."""
-    try:
-        data = nse.advanceDecline()
-        if not data:
-            return 0, "A/D: Could not fetch — skipping check"
-
-        # Handle list or dict response
-        if isinstance(data, list):
-            # Find NSE entry
-            nse_data = next((d for d in data if d.get("market") == "NSE"), data[0] if data else {})
-        else:
-            nse_data = data
-
-        advances = float(nse_data.get("advances", 0) or nse_data.get("advance", 0))
-        declines = float(nse_data.get("declines", 0) or nse_data.get("decline", 0))
-
-        if declines == 0:
-            return 0, "A/D: Could not calculate ratio"
+        if advances == 0 or declines == 0:
+            return 0, "A/D: Advance/decline counts not in response — skipping check"
 
         ratio = advances / declines
 
@@ -163,12 +138,7 @@ def check_stock_gap(symbol: str, entry_price: float, current_open: float) -> tup
 
 
 class MarketSentiment:
-    """
-    Run all market checks and return overall trading decision.
-    """
-
     def __init__(self):
-        self.nse = get_nse()
         self.score = 0
         self.checks = []
         self.decision = "TRADE"
@@ -178,12 +148,20 @@ class MarketSentiment:
         print("\n📊 Running market sentiment checks...")
         print("─" * 50)
 
-        # Run each check
+        indices = get_indices()
+        if not indices:
+            print("  ⚠️  Could not fetch indices from Groww — defaulting to REDUCE size")
+            return {
+                "score": 0, "decision": "REDUCE", "size_multiplier": 0.5,
+                "verdict": "⚠️ TRADE WITH 50% POSITION SIZE (indices unavailable)",
+                "checks": [],
+            }
+
         checks = [
-            ("VIX",      check_vix(self.nse)),
-            ("Nifty",    check_nifty(self.nse)),
-            ("FII",      check_fii(self.nse)),
-            ("A/D Ratio",check_advance_decline(self.nse)),
+            ("VIX",       check_vix(indices)),
+            ("Nifty",     check_nifty(indices)),
+            ("FII",       check_fii(indices)),
+            ("A/D Ratio", check_advance_decline(indices)),
         ]
 
         total_score = 0
@@ -194,7 +172,6 @@ class MarketSentiment:
 
         self.score = total_score
 
-        # Decision
         if total_score >= 3:
             self.decision = "TRADE"
             self.size_multiplier = 1.0
@@ -208,27 +185,25 @@ class MarketSentiment:
             self.size_multiplier = 0.0
             verdict = "❌ SKIP ALL TRADES TODAY"
 
-        print(f"─" * 50)
+        print("─" * 50)
         print(f"  Total Score: {total_score}")
         print(f"  Decision:    {verdict}")
-        print(f"─" * 50)
+        print("─" * 50)
 
         return {
-            "score":            total_score,
-            "decision":         self.decision,
-            "size_multiplier":  self.size_multiplier,
-            "verdict":          verdict,
-            "checks":           self.checks,
+            "score":           total_score,
+            "decision":        self.decision,
+            "size_multiplier": self.size_multiplier,
+            "verdict":         verdict,
+            "checks":          self.checks,
         }
 
     def check_individual_stock(self, symbol: str, entry: float, current_open: float) -> tuple:
-        """Check if individual stock is okay to trade."""
         score, message = check_stock_gap(symbol, entry, current_open)
         return score >= 0, message
 
 
 def run_sentiment_check() -> dict:
-    """Main function — run all checks and return result."""
     sentiment = MarketSentiment()
     return sentiment.run_all_checks()
 
