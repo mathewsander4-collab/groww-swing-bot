@@ -8,4 +8,5 @@ requests>=2.31
 gspread
 google-auth
 yfinance
-nse
+nse-india
+sendgrid

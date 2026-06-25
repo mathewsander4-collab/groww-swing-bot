@@ -1,116 +1,77 @@
-"""
-Email notification system using Gmail SMTP.
-Sends alerts for every bot action.
-"""
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import os
 from datetime import datetime
-
 import config
 
-
-def send_email(subject: str, body: str):
-    """Send an email notification."""
+def send_email(subject: str, body: str) -> bool:
+    """Send email via SendGrid."""
     try:
-        msg = MIMEMultipart()
-        msg["From"] = config.EMAIL_SENDER
-        msg["To"] = config.EMAIL_RECEIVER
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain"))
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(config.EMAIL_SENDER, config.EMAIL_PASSWORD)
-            server.sendmail(config.EMAIL_SENDER, config.EMAIL_RECEIVER, msg.as_string())
-        print(f"Email sent: {subject}")
+        api_key = os.environ.get("SENDGRID_API_KEY", "")
+        sender  = os.environ.get("EMAIL_SENDER", "")
+        receiver = os.environ.get("EMAIL_RECEIVER", "")
+
+        if not api_key:
+            print("[NOTIFIER] SENDGRID_API_KEY not set — skipping email")
+            return False
+
+        message = Mail(
+            from_email=sender,
+            to_emails=receiver,
+            subject=subject,
+            plain_text_content=body,
+        )
+
+        sg = sendgrid.SendGridAPIClient(api_key=api_key)
+        response = sg.send(message)
+        print(f"[NOTIFIER] Email sent: {subject} (status {response.status_code})")
+        return response.status_code in (200, 201, 202)
+
     except Exception as e:
-        print(f"Email failed: {e}")
+        print(f"[NOTIFIER] Email failed: {e}")
+        return False
 
 
-def notify_order_placed(symbol: str, entry: float, stop: float,
-                        target: float, shares: int, strategy: str):
-    mode = "PAPER TRADE" if config.PAPER_TRADE else "LIVE TRADE"
-    subject = f"[{mode}] BUY {symbol} @ ₹{entry:.2f}"
-    body = f"""
-Swing Bot Order — {datetime.now().strftime('%Y-%m-%d %H:%M')}
-Mode: {mode}
-
-Stock:    {symbol}
-Strategy: {strategy}
-Action:   BUY {shares} shares @ ₹{entry:.2f}
-Stop:     ₹{stop:.2f}
-Target:   ₹{target:.2f}
-Capital:  ₹{shares * entry:,.0f}
-Max Loss: ₹{shares * (entry - stop):,.0f}
-Max Gain: ₹{shares * (target - entry):,.0f}
-"""
-    send_email(subject, body)
-
-
-def notify_exit(symbol: str, entry: float, exit_price: float,
-                shares: int, reason: str):
-    pnl = (exit_price - entry) * shares
-    emoji = "✅ PROFIT" if pnl > 0 else "❌ LOSS"
-    mode = "PAPER TRADE" if config.PAPER_TRADE else "LIVE TRADE"
-    subject = f"[{mode}] {emoji} {symbol} exited @ ₹{exit_price:.2f}"
-    body = f"""
-Swing Bot Exit — {datetime.now().strftime('%Y-%m-%d %H:%M')}
-Mode: {mode}
-
-Stock:      {symbol}
-Exit reason: {reason}
-Entry:      ₹{entry:.2f}
-Exit:       ₹{exit_price:.2f}
-Shares:     {shares}
-P&L:        ₹{pnl:,.0f}
-"""
-    send_email(subject, body)
-
-
-def notify_daily_summary(signals: list, open_positions: list):
-    mode = "PAPER TRADE" if config.PAPER_TRADE else "LIVE TRADE"
-    subject = f"[{mode}] Daily Scan — {datetime.now().strftime('%Y-%m-%d')} — {len(signals)} signals"
-    
-    if not signals:
-        body = f"Daily Scan — {datetime.now().strftime('%Y-%m-%d')}\n\nNo setups found today."
-    else:
-        lines = [f"Daily Scan — {datetime.now().strftime('%Y-%m-%d')}\n",
-                 f"Mode: {mode}",
-                 f"Signals found: {len(signals)}\n",
-                 "TODAY'S SIGNALS:",
-                 "-" * 60]
-        for s in signals:
-            lines.append(
-                f"{s['symbol']:12s} | {s['strategy']:13s} | "
-                f"Entry: ₹{s['entry']:.2f} | Stop: ₹{s['stop']:.2f} | "
-                f"Target: ₹{s['target']:.2f} | Shares: {s.get('shares', 0)}"
-            )
-        if open_positions:
-            lines += ["\nOPEN POSITIONS:", "-" * 60]
-            for p in open_positions:
-                lines.append(
-                    f"{p['symbol']:12s} | Entry: ₹{p['entry']:.2f} | "
-                    f"Stop: ₹{p['stop']:.2f} | Target: ₹{p['target']:.2f}"
-                )
-        body = "\n".join(lines)
-    
-    send_email(subject, body)
-
-
-def notify_error(error_msg: str):
-    subject = f"[BOT ERROR] {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    body = f"Swing Bot Error:\n\n{error_msg}"
-    send_email(subject, body)
-
-
-def test_email():
-    """Test email connection — run this first to verify setup."""
-    send_email(
-        subject="Swing Bot — Email Test ✅",
-        body="Email notifications are working correctly!\n\nYour swing trading bot is ready."
+def notify_error(context: str, error: Exception) -> None:
+    """Send error alert email."""
+    subject = f"[SwingBot ERROR] {context}"
+    body = (
+        f"SwingBot encountered an error.\n\n"
+        f"Context : {context}\n"
+        f"Error   : {type(error).__name__}: {error}\n"
+        f"Time    : {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
     )
+    send_email(subject, body)
 
 
-if __name__ == "__main__":
-    print("Sending test email...")
-    test_email()
+def notify_trade(action: str, symbol: str, qty: int, price: float,
+                 stop: float, target: float, strategy: str) -> None:
+    """Send trade entry/exit notification."""
+    subject = f"[SwingBot] {action} — {symbol}"
+    body = (
+        f"Trade Alert\n"
+        f"-----------\n"
+        f"Action   : {action}\n"
+        f"Symbol   : {symbol}\n"
+        f"Qty      : {qty}\n"
+        f"Price    : ₹{price:.2f}\n"
+        f"Stop     : ₹{stop:.2f}\n"
+        f"Target   : ₹{target:.2f}\n"
+        f"Strategy : {strategy}\n"
+        f"Time     : {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
+    )
+    send_email(subject, body)
+
+
+def notify_sentiment_skip(score: int, details: list) -> None:
+    """Send notification when market sentiment is too weak to trade."""
+    subject = "[SwingBot] Trading SKIPPED — Poor Sentiment"
+    lines = "\n".join(f"  {name}: {msg} (score {s:+d})" for name, (s, msg) in details)
+    body = (
+        f"Sentiment check failed. No trades placed today.\n\n"
+        f"Total Score : {score}\n\n"
+        f"Breakdown:\n{lines}\n\n"
+        f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
+    )
+    send_email(subject, body)
