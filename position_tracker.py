@@ -1,6 +1,8 @@
 """
-Position tracker — saves and loads open positions to disk so the bot
-remembers what it owns between sessions.
+Position tracker — saves and loads open positions to Google Sheets
+so positions persist across Railway restarts and redeploys.
+
+Falls back to local JSON if Sheets is unavailable.
 """
 import json
 import os
@@ -11,37 +13,113 @@ import config
 POSITIONS_FILE = os.path.join(config.DATA_DIR, "open_positions.json")
 TRADE_LOG_FILE = os.path.join(config.DATA_DIR, "live_trade_log.json")
 
+POSITIONS_HEADERS = [
+    "symbol", "entry", "stop", "target", "shares",
+    "strategy", "order_id", "entry_date", "entry_time"
+]
+
+
+# ── Google Sheets helpers ─────────────────────────────────────────────────────
+
+def _get_positions_sheet():
+    """Get the Positions sheet tab."""
+    from google.oauth2.service_account import Credentials
+    import gspread
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds    = Credentials.from_service_account_file(config.GOOGLE_CREDS_FILE, scopes=scopes)
+    client   = gspread.authorize(creds)
+    workbook = client.open_by_key(config.GOOGLE_SHEET_ID)
+
+    try:
+        sheet = workbook.worksheet("Positions_DB")
+    except Exception:
+        sheet = workbook.add_worksheet(title="Positions_DB", rows=200, cols=20)
+        sheet.append_row(POSITIONS_HEADERS)
+
+    return sheet
+
+
+def _sheet_to_positions(sheet) -> list:
+    """Read all rows from Positions_DB sheet into list of dicts."""
+    rows = sheet.get_all_records()
+    positions = []
+    for row in rows:
+        if not row.get("symbol"):
+            continue
+        try:
+            positions.append({
+                "symbol":     str(row["symbol"]),
+                "entry":      float(row["entry"]),
+                "stop":       float(row["stop"]),
+                "target":     float(row["target"]),
+                "shares":     int(row["shares"]),
+                "strategy":   str(row.get("strategy", "")),
+                "order_id":   str(row.get("order_id", "PAPER")),
+                "entry_date": str(row.get("entry_date", "")),
+                "entry_time": str(row.get("entry_time", "")),
+            })
+        except Exception as e:
+            print(f"[PT] Skipping bad row {row}: {e}")
+    return positions
+
+
+def _positions_to_sheet(sheet, positions: list):
+    """Write all positions to sheet (clears first)."""
+    sheet.clear()
+    sheet.append_row(POSITIONS_HEADERS)
+    for p in positions:
+        sheet.append_row([
+            p["symbol"], p["entry"], p["stop"], p["target"], p["shares"],
+            p.get("strategy", ""), p.get("order_id", "PAPER"),
+            p.get("entry_date", ""), p.get("entry_time", "")
+        ])
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def load_positions() -> list:
-    """Load open positions from disk."""
-    if not os.path.exists(POSITIONS_FILE):
-        return []
-    with open(POSITIONS_FILE) as f:
-        return json.load(f)
+    """Load open positions from Google Sheets (fallback: local JSON)."""
+    try:
+        sheet = _get_positions_sheet()
+        positions = _sheet_to_positions(sheet)
+        # Also keep local copy as backup
+        _save_local(positions)
+        return positions
+    except Exception as e:
+        print(f"[PT] Sheets load failed ({e}) — using local JSON")
+        return _load_local()
 
 
 def save_positions(positions: list):
-    """Save open positions to disk."""
-    with open(POSITIONS_FILE, "w") as f:
-        json.dump(positions, f, indent=2, default=str)
+    """Save open positions to Google Sheets (and local JSON backup)."""
+    try:
+        sheet = _get_positions_sheet()
+        _positions_to_sheet(sheet, positions)
+        _save_local(positions)
+    except Exception as e:
+        print(f"[PT] Sheets save failed ({e}) — saving to local JSON only")
+        _save_local(positions)
 
 
 def add_position(symbol: str, entry: float, stop: float,
                  target: float, shares: int, strategy: str,
                  order_id: str = "PAPER"):
     positions = load_positions()
-    # Avoid duplicates
     if any(p["symbol"] == symbol for p in positions):
         print(f"Position already exists for {symbol} — skipping")
         return
     positions.append({
-        "symbol": symbol,
-        "entry": entry,
-        "stop": stop,
-        "target": target,
-        "shares": shares,
-        "strategy": strategy,
-        "order_id": order_id,
+        "symbol":     symbol,
+        "entry":      entry,
+        "stop":       stop,
+        "target":     target,
+        "shares":     shares,
+        "strategy":   strategy,
+        "order_id":   order_id,
         "entry_date": datetime.now().strftime("%Y-%m-%d"),
         "entry_time": datetime.now().strftime("%H:%M:%S"),
     })
@@ -58,13 +136,12 @@ def remove_position(symbol: str, exit_price: float, reason: str):
 
     pnl = (exit_price - pos["entry"]) * pos["shares"]
 
-    # Log the closed trade
     log_trade({
         **pos,
-        "exit_price": exit_price,
-        "exit_date": datetime.now().strftime("%Y-%m-%d"),
+        "exit_price":  exit_price,
+        "exit_date":   datetime.now().strftime("%Y-%m-%d"),
         "exit_reason": reason,
-        "pnl": pnl,
+        "pnl":         pnl,
     })
 
     positions = [p for p in positions if p["symbol"] != symbol]
@@ -74,6 +151,7 @@ def remove_position(symbol: str, exit_price: float, reason: str):
 
 
 def log_trade(trade: dict):
+    """Append closed trade to local trade log JSON."""
     trades = []
     if os.path.exists(TRADE_LOG_FILE):
         with open(TRADE_LOG_FILE) as f:
@@ -94,3 +172,18 @@ def print_positions():
         print(f"{p['symbol']:12s} | {p['shares']} shares @ ₹{p['entry']:.2f} | "
               f"Stop: ₹{p['stop']:.2f} | Target: ₹{p['target']:.2f} | "
               f"Since: {p['entry_date']}")
+
+
+# ── Local JSON fallback ───────────────────────────────────────────────────────
+
+def _load_local() -> list:
+    if not os.path.exists(POSITIONS_FILE):
+        return []
+    with open(POSITIONS_FILE) as f:
+        return json.load(f)
+
+
+def _save_local(positions: list):
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    with open(POSITIONS_FILE, "w") as f:
+        json.dump(positions, f, indent=2, default=str)
