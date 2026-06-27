@@ -217,33 +217,19 @@ def scheduler_loop():
         time.sleep(30)  # check every 30 seconds
 
 
-def start_dashboard():
-    """Run Flask dashboard in a background thread."""
+if __name__ == "__main__":
+    import threading
+
+    # Run scheduler in background thread
+    scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
+    scheduler_thread.start()
+
+    # Run Flask in main thread — Railway needs web server as main process
     try:
         from dashboard import app
-        import os
         port = int(os.environ.get("PORT", 5000))
         print(f"[DASHBOARD] Starting on port {port}...")
         app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
     except Exception as e:
         print(f"[DASHBOARD] Failed to start: {e}")
-
-
-if __name__ == "__main__":
-    import threading
-
-    # Start dashboard FIRST in background thread
-    dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
-    dashboard_thread.start()
-
-    # Give Flask 3 seconds to bind before scheduler starts
-    time.sleep(3)
-
-    # Run scheduler in main thread
-    try:
-        scheduler_loop()
-    except KeyboardInterrupt:
-        print("\nScheduler stopped.")
-    except Exception as e:
-        notify_error(f"Scheduler crashed: {e}")
-        raise
+        notify_error(f"Dashboard failed: {e}")
