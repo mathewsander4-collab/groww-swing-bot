@@ -115,21 +115,19 @@ def run_eod():
     except Exception as e:
         print(f"EOD report error: {e}")
 
-    # Evening scan
+    # Evening scan + sync directly to Sheets (don't rely on CSV file)
+    scan_results = None
     try:
         from scanner import run_scan, print_report
-        results = run_scan()
-        print_report(results)
-        if not results.empty:
-            out_path = f"{config.DATA_DIR}/scan_{ist_now().strftime('%Y%m%d')}.csv"
-            results.to_csv(out_path, index=False)
+        scan_results = run_scan()
+        print_report(scan_results)
     except Exception as e:
         print(f"Scanner error: {e}")
 
-    # Sync all sheets
+    # Sync all sheets — pass scan_results directly so Signals tab is always fresh
     try:
         from sheets import sync_all
-        sync_all()
+        sync_all(scan_results=scan_results)
     except Exception as e:
         print(f"Sheets sync error: {e}")
 

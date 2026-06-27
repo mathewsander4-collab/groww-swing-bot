@@ -208,24 +208,34 @@ def sync_trade_log(workbook):
     print(f"✅ Trade log synced ({len(trades)} trades)")
 
 
-def sync_signals(workbook):
-    """Sync latest scan signals to Signals sheet."""
+def sync_signals(workbook, df: pd.DataFrame = None):
+    """Sync latest scan signals to Signals sheet.
+
+    Pass df directly from scanner (preferred on Railway — avoids CSV filesystem loss).
+    Falls back to latest local CSV file if df is None (local runs).
+    """
     headers = [
         "Symbol", "Strategy", "Entry ₹", "Stop ₹", "Target ₹",
         "Shares", "Capital ₹", "Risk %", "Reason", "Scan Date"
     ]
     sheet = get_or_create_sheet(workbook, TAB_SIGNALS, headers)
 
-    # Load latest scan file
-    pattern = os.path.join(config.DATA_DIR, "scan_*.csv")
-    files   = sorted(glob.glob(pattern))
-    if not files:
-        print("No scan files found.")
-        return
+    scan_date = datetime.now().strftime("%Y%m%d")
 
-    latest    = files[-1]
-    scan_date = os.path.basename(latest).replace("scan_", "").replace(".csv", "")
-    df        = pd.read_csv(latest)
+    if df is None:
+        # Fallback: load latest CSV (for local runs only)
+        pattern = os.path.join(config.DATA_DIR, "scan_*.csv")
+        files   = sorted(glob.glob(pattern))
+        if not files:
+            print("No scan files found.")
+            return
+        latest    = files[-1]
+        scan_date = os.path.basename(latest).replace("scan_", "").replace(".csv", "")
+        df        = pd.read_csv(latest)
+
+    if df is None or df.empty:
+        print("No signals to sync.")
+        return
 
     sheet.clear()
     sheet.append_row(headers)
@@ -305,7 +315,7 @@ def sync_summary(workbook):
     print(f"✅ Summary synced")
 
 
-def sync_all(price_data: dict = None):
+def sync_all(price_data: dict = None, scan_results: pd.DataFrame = None):
     """Sync everything to Google Sheets."""
     print("\nSyncing to Google Sheets...")
     try:
@@ -314,7 +324,7 @@ def sync_all(price_data: dict = None):
 
         sync_positions(workbook, price_data)
         sync_trade_log(workbook)
-        sync_signals(workbook)
+        sync_signals(workbook, df=scan_results)  # pass df directly — no CSV needed
         sync_summary(workbook)
 
         sheet_url = f"https://docs.google.com/spreadsheets/d/{config.GOOGLE_SHEET_ID}"
