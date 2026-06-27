@@ -161,17 +161,6 @@ def scheduler_loop():
     print(f"Time: {ist_now().strftime('%Y-%m-%d %H:%M')} IST")
     print("=" * 60)
 
- # ── NSE connectivity test ──────────────────────────
-    try:
-        import requests
-        s = requests.Session()
-        s.get("https://www.nseindia.com", headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        r = s.get("https://www.nseindia.com/api/allIndices", headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        print(f"NSE API test: {r.status_code} ✅" if r.status_code == 200 else f"NSE API test: {r.status_code} ❌")
-    except Exception as e:
-        print(f"NSE API test FAILED: {e}")
-    # ───────────────────────────────────────────────────
-
     auth_done         = False
     morning_done      = False
     eod_done          = False
@@ -228,7 +217,29 @@ def scheduler_loop():
         time.sleep(30)  # check every 30 seconds
 
 
+def start_dashboard():
+    """Run Flask dashboard in a background thread."""
+    try:
+        from dashboard import app
+        import os
+        port = int(os.environ.get("PORT", 5000))
+        print(f"[DASHBOARD] Starting on port {port}...")
+        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        print(f"[DASHBOARD] Failed to start: {e}")
+
+
 if __name__ == "__main__":
+    import threading
+
+    # Start dashboard FIRST in background thread
+    dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
+    dashboard_thread.start()
+
+    # Give Flask 3 seconds to bind before scheduler starts
+    time.sleep(3)
+
+    # Run scheduler in main thread
     try:
         scheduler_loop()
     except KeyboardInterrupt:
