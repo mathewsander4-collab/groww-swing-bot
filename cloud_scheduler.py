@@ -61,13 +61,10 @@ def run_morning_trading():
         print(f"Sentiment check error: {e} — defaulting to REDUCE")
         sentiment = {"decision": "REDUCE", "size_multiplier": 0.5}
 
-    # Step 3: Place trades based on sentiment
+    # Step 3: Place trades — pass pre-computed sentiment (no double check in trader.py)
     try:
         from trader import run_morning_session
-        run_morning_session(
-            size_multiplier=sentiment.get("size_multiplier", 1.0),
-            skip_trades=(sentiment.get("decision") == "SKIP"),
-        )
+        run_morning_session(sentiment=sentiment)
     except Exception as e:
         print(f"Trading error: {e}")
         notify_error(f"Morning trading failed: {e}")

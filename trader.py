@@ -27,10 +27,17 @@ import config
 import notifier
 import position_tracker as pt
 from groww_client import GrowwClient
-from sentiment import run_sentiment_check
 
 
-def load_latest_signals() -> list:
+def load_latest_signals(signals_df: pd.DataFrame = None) -> list:
+    """Load signals from DataFrame (preferred) or fall back to latest CSV.
+    
+    Pass signals_df directly from scanner to avoid Railway filesystem loss.
+    CSV fallback is for manual local runs only.
+    """
+    if signals_df is not None and not signals_df.empty:
+        return signals_df.to_dict("records")
+    # Fallback: local CSV
     pattern = os.path.join(config.DATA_DIR, "scan_*.csv")
     files = sorted(glob.glob(pattern))
     if not files:
@@ -86,7 +93,7 @@ def execute_signals(signals: list, sentiment: dict):
     # Skip all trades if market is bearish
     if decision == "SKIP":
         msg = f"Market sentiment check FAILED — {verdict}\n\nNo trades placed today.\n\nChecks:\n"
-        for c in sentiment["checks"]:
+        for c in sentiment.get("checks", []):
             msg += f"  {c['message']}\n"
         print(msg)
         notifier.send_email(
@@ -122,17 +129,19 @@ def execute_signals(signals: list, sentiment: dict):
         stop   = float(sig["stop"])
         target = float(sig["target"])
 
-        # Check individual stock gap
+        # Gap check via yfinance (get_quotes is broken on Groww API)
         try:
-            quote       = client.get_quotes([symbol])
-            current_open = float(quote.get(symbol, {}).get("open", entry))
-            gap_pct      = (current_open - entry) / entry * 100
+            import yfinance as yf
+            ticker = yf.Ticker(f"{symbol}.NS")
+            info   = ticker.fast_info
+            current_open = float(info.get("open") or info.get("lastPrice") or entry)
+            gap_pct = (current_open - entry) / entry * 100
             if gap_pct < -2.0:
                 print(f"❌ {symbol} gapped down {gap_pct:.1f}% — skipping")
                 continue
             elif gap_pct < 0:
                 print(f"⚠️ {symbol} slight gap down {gap_pct:.1f}% — entering cautiously")
-        except:
+        except Exception:
             pass  # if quote fails, proceed anyway
 
         try:
@@ -164,21 +173,23 @@ def execute_signals(signals: list, sentiment: dict):
 
 
 def check_positions():
+    """Check open positions and trigger exits if stop/target hit."""
     positions = pt.load_positions()
     if not positions:
         return
-    client  = GrowwClient()
-    symbols = [p["symbol"] for p in positions]
-    quotes  = client.get_quotes(symbols)
-
+    
     for pos in positions:
         symbol = pos["symbol"]
-        quote  = quotes.get(symbol, {})
-        if not quote or "error" in quote:
-            continue
-        ltp = float(quote.get("ltp", 0) or quote.get("close", 0))
+        try:
+            import yfinance as yf
+            info = yf.Ticker(f"{symbol}.NS").fast_info
+            ltp  = float(info.get("lastPrice") or info.get("previousClose") or 0)
+        except Exception:
+            ltp = 0
+
         if not ltp:
             continue
+
         if ltp <= pos["stop"]:
             pt.remove_position(symbol, pos["stop"], "stop_hit")
             notifier.notify_exit(symbol, pos["entry"], pos["stop"], pos["shares"], "Stop Loss Hit")
@@ -187,18 +198,34 @@ def check_positions():
             notifier.notify_exit(symbol, pos["entry"], pos["target"], pos["shares"], "Target Hit")
 
 
-def run_morning_session():
+def run_morning_session(sentiment: dict = None, size_multiplier: float = None, skip_trades: bool = False, signals_df: pd.DataFrame = None):
+    """Run the morning trading session.
+
+    Args:
+        sentiment:        Pre-computed sentiment dict from cloud_scheduler (avoids double check).
+        size_multiplier:  Override position size (0.5 = 50%). Ignored if sentiment passed.
+        skip_trades:      If True, skip all trade placement.
+        signals_df:       Scanner results as DataFrame (avoids CSV filesystem dependency).
+    """
     print(f"\n{'='*60}")
     print(f"SWING BOT — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Mode: {'PAPER TRADE' if config.PAPER_TRADE else '⚠️ LIVE TRADE'}")
     print(f"{'='*60}\n")
 
-    # Step 1 — Market sentiment check
-    sentiment = run_sentiment_check()
+    # Step 1 — Use pre-computed sentiment or run fresh check
+    if sentiment is None:
+        from sentiment import run_sentiment_check
+        sentiment = run_sentiment_check()
 
-    # Step 2 — Load signals
-    signals = load_latest_signals()
-    print(f"\nLoaded {len(signals)} signals from last scan")
+    # Override with explicit skip if passed from scheduler
+    if skip_trades:
+        sentiment["decision"]        = "SKIP"
+        sentiment["size_multiplier"] = 0.0
+        sentiment["verdict"]         = "❌ SKIP ALL TRADES TODAY (scheduler override)"
+
+    # Step 2 — Load signals (from DataFrame if available, else CSV)
+    signals = load_latest_signals(signals_df)
+    print(f"\nLoaded {len(signals)} signals")
 
     # Step 3 — Place orders
     execute_signals(signals, sentiment)
