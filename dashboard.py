@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 from flask import Flask, render_template, jsonify
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), 'templates'))
 
 # ── Google Sheets helpers ─────────────────────────────────────────────────────
 
