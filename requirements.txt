@@ -9,3 +9,5 @@ gspread
 google-auth
 yfinance
 sendgrid
+flask
+gunicorn

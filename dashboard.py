@@ -1,285 +1,144 @@
 """
-Live dashboard — shows open positions, current P&L, and today's signals.
-Runs a local web server accessible from your phone on the same hotspot.
+SwingBot Dashboard — mobile-first web dashboard.
+Reads live data from Google Sheets and NSE API.
+Deploy as a separate Railway service.
 
-Usage:
+Run locally:
     python dashboard.py
-Then open on phone browser: http://192.168.x.x:5000
-(IP address will be printed when you run it)
 """
-import json
 import os
-import socket
-import threading
-import time
+import json
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from flask import Flask, render_template, jsonify
 
-import config
-import position_tracker as pt
-from groww_client import GrowwClient
+app = Flask(__name__)
 
-# Cache prices so we don't hit API on every page refresh
-_price_cache = {}
-_cache_time = 0
-CACHE_TTL = 60  # refresh prices every 60 seconds
+# ── Google Sheets helpers ─────────────────────────────────────────────────────
+
+def get_workbook():
+    from google.oauth2.service_account import Credentials
+    import gspread
+
+    creds_json = os.environ.get("GOOGLE_CREDS_JSON")
+    sheet_id   = os.environ.get("GOOGLE_SHEET_ID")
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+
+    if creds_json:
+        creds_dict = json.loads(creds_json)
+        creds      = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    else:
+        creds_file = os.path.join(os.path.dirname(__file__), "..", "data", "swingbot-credentials.json")
+        creds      = Credentials.from_service_account_file(creds_file, scopes=scopes)
+
+    client   = gspread.authorize(creds)
+    return client.open_by_key(sheet_id)
 
 
-def get_local_ip():
+def get_sheet_data(tab_name):
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except:
-        return "127.0.0.1"
-
-
-def fetch_prices(symbols: list) -> dict:
-    global _price_cache, _cache_time
-    now = time.time()
-    if now - _cache_time < CACHE_TTL and _price_cache:
-        return _price_cache
-    try:
-        client = GrowwClient()
-        quotes = client.get_quotes(symbols)
-        prices = {}
-        for sym, q in quotes.items():
-            if isinstance(q, dict) and "error" not in q:
-                prices[sym] = float(q.get("ltp") or q.get("close") or 0)
-        _price_cache = prices
-        _cache_time = now
-        return prices
+        wb    = get_workbook()
+        sheet = wb.worksheet(tab_name)
+        return sheet.get_all_records()
     except Exception as e:
-        print(f"Price fetch error: {e}")
-        return _price_cache
-
-
-def load_latest_signals() -> list:
-    import glob
-    pattern = os.path.join(config.DATA_DIR, "scan_*.csv")
-    files = sorted(glob.glob(pattern))
-    if not files:
+        print(f"Sheet load failed [{tab_name}]: {e}")
         return []
-    import pandas as pd
-    df = pd.read_csv(files[-1])
-    return df.to_dict("records")
 
 
-def build_html() -> str:
-    positions = pt.load_positions()
-    signals = load_latest_signals()
+# ── Sentiment via NSE ─────────────────────────────────────────────────────────
 
-    # Fetch current prices
-    symbols = [p["symbol"] for p in positions]
-    prices = fetch_prices(symbols) if symbols else {}
+def get_sentiment():
+    try:
+        import requests
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "*/*",
+            "Referer": "https://www.nseindia.com/",
+        }
+        s = requests.Session()
+        s.get("https://www.nseindia.com", headers=headers, timeout=10)
+        r = s.get("https://www.nseindia.com/api/allIndices", headers=headers, timeout=10)
+        data = r.json().get("data", [])
 
-    # Calculate P&L
-    total_invested = 0
-    total_current = 0
-    total_pnl = 0
-    rows = []
+        vix_data   = next((x for x in data if "VIX"     in str(x.get("index", "")).upper()), {})
+        nifty_data = next((x for x in data if "NIFTY 50" == str(x.get("index", "")).upper()), {})
 
-    for p in positions:
-        sym = p["symbol"]
-        entry = p["entry"]
-        shares = p["shares"]
-        stop = p["stop"]
-        target = p["target"]
-        ltp = prices.get(sym, 0)
-        invested = entry * shares
-        current_val = ltp * shares if ltp else invested
-        pnl = (ltp - entry) * shares if ltp else 0
-        pnl_pct = ((ltp - entry) / entry * 100) if ltp else 0
+        vix        = float(vix_data.get("last", 0) or 0)
+        nifty_chg  = float(nifty_data.get("percentChange", 0) or 0)
+        nifty_last = float(nifty_data.get("last", 0) or 0)
+        advances   = int(nifty_data.get("advances", 0) or 0)
+        declines   = int(nifty_data.get("declines", 0) or 0)
+        ad_ratio   = round(advances / declines, 2) if declines else 0
 
-        total_invested += invested
-        total_current += current_val
-        total_pnl += pnl
+        # Score
+        score = 0
+        if vix > 0:
+            score += 1 if vix < 18 else (0 if vix < 22 else -2)
+        if nifty_chg != 0:
+            score += 1 if nifty_chg >= -0.3 else (0 if nifty_chg >= -0.8 else -2)
+        if ad_ratio > 0:
+            score += 1 if ad_ratio >= 1.5 else (0 if ad_ratio >= 0.8 else -2)
 
-        # Status
-        if ltp >= target:
-            status = "🎯 TARGET"
-            status_color = "#00c853"
-        elif ltp <= stop and ltp > 0:
-            status = "🛑 STOP"
-            status_color = "#ff1744"
-        elif pnl > 0:
-            status = "🟢 PROFIT"
-            status_color = "#00c853"
-        elif pnl < 0:
-            status = "🔴 LOSS"
-            status_color = "#ff1744"
+        if score >= 3:
+            decision = "TRADE"
+        elif score >= 0:
+            decision = "REDUCE"
         else:
-            status = "⚪ WAITING"
-            status_color = "#888"
+            decision = "SKIP"
 
-        rows.append({
-            "symbol": sym,
-            "entry": entry,
-            "ltp": ltp,
-            "stop": stop,
-            "target": target,
-            "shares": shares,
-            "invested": invested,
-            "pnl": pnl,
-            "pnl_pct": pnl_pct,
-            "status": status,
-            "status_color": status_color,
-            "since": p.get("entry_date", ""),
-            "strategy": p.get("strategy", ""),
-        })
-
-    total_pnl_pct = (total_pnl / total_invested * 100) if total_invested else 0
-    mode = "📄 PAPER TRADE" if config.PAPER_TRADE else "💰 LIVE TRADE"
-    pnl_color = "#00c853" if total_pnl >= 0 else "#ff1744"
-
-    # Build position rows HTML
-    position_rows_html = ""
-    for r in rows:
-        pnl_str = f"₹{r['pnl']:+,.0f} ({r['pnl_pct']:+.1f}%)" if r["ltp"] else "—"
-        ltp_str = f"₹{r['ltp']:.2f}" if r["ltp"] else "—"
-        pnl_cell_color = "#00c853" if r["pnl"] >= 0 else "#ff1744"
-        position_rows_html += f"""
-        <tr>
-            <td><b>{r['symbol']}</b><br><small style='color:#aaa'>{r['strategy']}</small></td>
-            <td>₹{r['entry']:.2f}</td>
-            <td>{ltp_str}</td>
-            <td>₹{r['stop']:.2f}</td>
-            <td>₹{r['target']:.2f}</td>
-            <td>{r['shares']}</td>
-            <td>₹{r['invested']:,.0f}</td>
-            <td style='color:{pnl_cell_color};font-weight:bold'>{pnl_str}</td>
-            <td style='color:{r['status_color']};font-weight:bold'>{r['status']}</td>
-            <td><small>{r['since']}</small></td>
-        </tr>"""
-
-    # Build signals HTML
-    signal_rows_html = ""
-    for s in signals[:8]:
-        signal_rows_html += f"""
-        <tr>
-            <td><b>{s['symbol']}</b></td>
-            <td>{s['strategy']}</td>
-            <td>₹{float(s['entry']):.2f}</td>
-            <td>₹{float(s['stop']):.2f}</td>
-            <td>₹{float(s['target']):.2f}</td>
-            <td>{int(s['shares'])}</td>
-            <td>₹{float(s['capital_used']):,.0f}</td>
-            <td>{s['reason']}</td>
-        </tr>"""
-
-    # Available capital
-    used_capital = sum(p["entry"] * p["shares"] for p in positions)
-    available = max(0, config.CAPITAL - used_capital)
-
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1'>
-    <title>Swing Bot Dashboard</title>
-    <meta http-equiv='refresh' content='60'>
-    <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ background: #0d0d0d; color: #f0f0f0; font-family: Arial, sans-serif; padding: 12px; }}
-        h1 {{ font-size: 20px; margin-bottom: 4px; }}
-        h2 {{ font-size: 16px; margin: 16px 0 8px; color: #aaa; }}
-        .badge {{ display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; background:#333; margin-left:8px; }}
-        .cards {{ display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }}
-        .card {{ background:#1a1a1a; border-radius:10px; padding:14px 18px; min-width:140px; flex:1; }}
-        .card .label {{ font-size:11px; color:#888; margin-bottom:4px; }}
-        .card .value {{ font-size:22px; font-weight:bold; }}
-        table {{ width:100%; border-collapse:collapse; font-size:12px; }}
-        th {{ background:#1a1a1a; padding:8px 6px; text-align:left; color:#aaa; font-weight:normal; }}
-        td {{ padding:8px 6px; border-bottom:1px solid #1a1a1a; vertical-align:top; }}
-        tr:hover td {{ background:#1a1a1a; }}
-        .time {{ font-size:11px; color:#555; margin-top:4px; }}
-        .scroll {{ overflow-x:auto; }}
-    </style>
-</head>
-<body>
-    <h1>📈 Swing Bot <span class='badge'>{mode}</span></h1>
-    <div class='time'>Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} &nbsp;|&nbsp; Auto-refresh: 60s</div>
-
-    <div class='cards'>
-        <div class='card'>
-            <div class='label'>Total Capital</div>
-            <div class='value'>₹{config.CAPITAL:,.0f}</div>
-        </div>
-        <div class='card'>
-            <div class='label'>Invested</div>
-            <div class='value'>₹{used_capital:,.0f}</div>
-        </div>
-        <div class='card'>
-            <div class='label'>Available</div>
-            <div class='value'>₹{available:,.0f}</div>
-        </div>
-        <div class='card'>
-            <div class='label'>Total P&L</div>
-            <div class='value' style='color:{pnl_color}'>₹{total_pnl:+,.0f}</div>
-        </div>
-        <div class='card'>
-            <div class='label'>P&L %</div>
-            <div class='value' style='color:{pnl_color}'>{total_pnl_pct:+.2f}%</div>
-        </div>
-        <div class='card'>
-            <div class='label'>Open Trades</div>
-            <div class='value'>{len(positions)}</div>
-        </div>
-    </div>
-
-    <h2>📂 Open Positions</h2>
-    <div class='scroll'>
-    <table>
-        <tr>
-            <th>Stock</th><th>Entry</th><th>LTP</th><th>Stop</th>
-            <th>Target</th><th>Qty</th><th>Invested</th><th>P&L</th>
-            <th>Status</th><th>Since</th>
-        </tr>
-        {position_rows_html if position_rows_html else "<tr><td colspan='10' style='text-align:center;color:#555;padding:20px'>No open positions</td></tr>"}
-    </table>
-    </div>
-
-    <h2>🔍 Latest Signals</h2>
-    <div class='scroll'>
-    <table>
-        <tr>
-            <th>Stock</th><th>Strategy</th><th>Entry</th><th>Stop</th>
-            <th>Target</th><th>Qty</th><th>Capital</th><th>Reason</th>
-        </tr>
-        {signal_rows_html if signal_rows_html else "<tr><td colspan='8' style='text-align:center;color:#555;padding:20px'>No signals — run python main.py scan</td></tr>"}
-    </table>
-    </div>
-</body>
-</html>"""
-    return html
+        return {
+            "vix": vix, "nifty_chg": nifty_chg, "nifty_last": nifty_last,
+            "advances": advances, "declines": declines, "ad_ratio": ad_ratio,
+            "score": score, "decision": decision,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
-class DashboardHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        html = build_html()
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(html.encode())
+# ── Routes ────────────────────────────────────────────────────────────────────
 
-    def log_message(self, format, *args):
-        pass  # suppress request logs
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 
-def run_server(port=5000):
-    ip = get_local_ip()
-    server = HTTPServer(("0.0.0.0", port), DashboardHandler)
-    print(f"\n{'='*50}")
-    print(f"Dashboard running!")
-    print(f"Open on your phone: http://{ip}:{port}")
-    print(f"Make sure phone is on same hotspot as laptop")
-    print(f"Page auto-refreshes every 60 seconds")
-    print(f"Press Ctrl+C to stop")
-    print(f"{'='*50}\n")
-    server.serve_forever()
+@app.route("/api/data")
+def api_data():
+    positions  = get_sheet_data("Positions_DB")
+    signals    = get_sheet_data("Signals")
+    trade_log  = get_sheet_data("Trade Log")
+    daily_pnl  = get_sheet_data("Daily P&L")
+    sentiment  = get_sentiment()
+
+    # Calculate summary stats
+    total_invested = sum(
+        float(p.get("entry", 0)) * int(p.get("shares", 0))
+        for p in positions if p.get("symbol")
+    )
+    total_pnl = sum(float(t.get("pnl", 0)) for t in trade_log)
+    wins      = len([t for t in trade_log if float(t.get("pnl", 0)) > 0])
+    win_rate  = round(wins / len(trade_log) * 100, 1) if trade_log else 0
+
+    return jsonify({
+        "positions":       positions,
+        "signals":         signals,
+        "trade_log":       trade_log[-20:],  # last 20 trades
+        "daily_pnl":       daily_pnl[-30:],  # last 30 days
+        "sentiment":       sentiment,
+        "summary": {
+            "open_positions":  len(positions),
+            "total_invested":  round(total_invested, 0),
+            "total_pnl":       round(total_pnl, 0),
+            "win_rate":        win_rate,
+            "total_trades":    len(trade_log),
+        },
+        "last_updated": datetime.now().strftime("%H:%M:%S"),
+    })
 
 
 if __name__ == "__main__":
-    run_server()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
