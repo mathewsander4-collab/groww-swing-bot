@@ -83,7 +83,6 @@ def run_scan(refresh_universe: bool = False) -> pd.DataFrame:
     # Save to Google Sheets Signals tab (primary store — survives Railway redeploys)
     try:
         from sheets import get_client, sync_signals
-        import config
         client   = get_client()
         workbook = client.open_by_key(config.GOOGLE_SHEET_ID)
         sync_signals(workbook, df=results_df)
