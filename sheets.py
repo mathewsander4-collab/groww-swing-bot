@@ -261,6 +261,35 @@ def sync_signals(workbook, df: pd.DataFrame = None):
     print(f"✅ Signals synced ({len(rows)} signals from {scan_date})")
 
 
+def load_signals(workbook) -> list:
+    """Load latest signals from Sheets Signals tab — used by trader.py on morning session."""
+    try:
+        sheet = workbook.worksheet(TAB_SIGNALS)
+        rows  = sheet.get_all_records()
+        if not rows:
+            return []
+        signals = []
+        for row in rows:
+            if not row.get("Symbol"):
+                continue
+            signals.append({
+                "symbol":       str(row.get("Symbol", "")),
+                "strategy":     str(row.get("Strategy", "")),
+                "entry":        float(row.get("Entry ₹", 0) or 0),
+                "stop":         float(row.get("Stop ₹", 0) or 0),
+                "target":       float(row.get("Target ₹", 0) or 0),
+                "shares":       int(row.get("Shares", 0) or 0),
+                "capital_used": float(row.get("Capital ₹", 0) or 0),
+                "risk_pct":     float(row.get("Risk %", 0) or 0),
+                "reason":       str(row.get("Reason", "")),
+            })
+        print(f"[SHEETS] Loaded {len(signals)} signals from Sheets")
+        return signals
+    except Exception as e:
+        print(f"[SHEETS] load_signals failed: {e}")
+        return []
+
+
 def sync_daily_pnl(workbook, date_str: str, total_pnl: float, positions_count: int):
     """Append today's P&L to Daily P&L sheet."""
     headers = ["Date", "Total P&L ₹", "P&L %", "Open Positions", "Mode"]

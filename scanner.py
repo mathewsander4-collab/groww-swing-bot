@@ -78,7 +78,20 @@ def run_scan(refresh_universe: bool = False) -> pd.DataFrame:
         sized_rows.append(r)
         open_count += 1
 
-    return pd.DataFrame(sized_rows)
+    results_df = pd.DataFrame(sized_rows)
+
+    # Save to Google Sheets Signals tab (primary store — survives Railway redeploys)
+    try:
+        from sheets import get_client, sync_signals
+        import config
+        client   = get_client()
+        workbook = client.open_by_key(config.GOOGLE_SHEET_ID)
+        sync_signals(workbook, df=results_df)
+        print("✅ Signals saved to Google Sheets")
+    except Exception as e:
+        print(f"Sheets signals save failed: {e}")
+
+    return results_df
 
 
 def print_report(df: pd.DataFrame):

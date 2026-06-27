@@ -30,19 +30,34 @@ from groww_client import GrowwClient
 
 
 def load_latest_signals(signals_df: pd.DataFrame = None) -> list:
-    """Load signals from DataFrame (preferred) or fall back to latest CSV.
-    
-    Pass signals_df directly from scanner to avoid Railway filesystem loss.
-    CSV fallback is for manual local runs only.
+    """Load signals in priority order:
+    1. DataFrame passed directly from scanner (same-day EOD run)
+    2. Google Sheets Signals tab (survives Railway redeploys)
+    3. Local CSV fallback (manual runs only)
     """
+    # 1. Direct DataFrame from scanner
     if signals_df is not None and not signals_df.empty:
         return signals_df.to_dict("records")
-    # Fallback: local CSV
+
+    # 2. Google Sheets Signals tab
+    try:
+        from sheets import get_client, load_signals
+        client   = get_client()
+        workbook = client.open_by_key(config.GOOGLE_SHEET_ID)
+        signals  = load_signals(workbook)
+        if signals:
+            return signals
+    except Exception as e:
+        print(f"Sheets signals load failed: {e}")
+
+    # 3. Local CSV fallback
     pattern = os.path.join(config.DATA_DIR, "scan_*.csv")
-    files = sorted(glob.glob(pattern))
+    files   = sorted(glob.glob(pattern))
     if not files:
+        print("No signals found anywhere — CSV, Sheets, or DataFrame.")
         return []
     df = pd.read_csv(files[-1])
+    print(f"Using local CSV fallback: {files[-1]}")
     return df.to_dict("records")
 
 
