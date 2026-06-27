@@ -6,7 +6,7 @@ Usage:
     python eod_report.py
 """
 import os
-from datetime import datetime, date
+from datetime import datetime
 
 import pandas as pd
 

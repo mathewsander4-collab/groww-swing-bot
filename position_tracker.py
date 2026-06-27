@@ -151,7 +151,8 @@ def remove_position(symbol: str, exit_price: float, reason: str):
 
 
 def log_trade(trade: dict):
-    """Append closed trade to local trade log JSON."""
+    """Append closed trade to local JSON and Google Sheets Trade Log tab."""
+    # 1. Save to local JSON
     trades = []
     if os.path.exists(TRADE_LOG_FILE):
         with open(TRADE_LOG_FILE) as f:
@@ -159,6 +160,33 @@ def log_trade(trade: dict):
     trades.append(trade)
     with open(TRADE_LOG_FILE, "w") as f:
         json.dump(trades, f, indent=2, default=str)
+
+    # 2. Append to Sheets Trade Log tab (so it survives Railway redeploys)
+    try:
+        sheet = _get_positions_sheet()
+        workbook = sheet.spreadsheet
+        try:
+            log_sheet = workbook.worksheet("Trade Log")
+        except Exception:
+            log_sheet = workbook.add_worksheet(title="Trade Log", rows=1000, cols=15)
+            log_sheet.append_row([
+                "symbol", "strategy", "entry", "exit_price", "shares",
+                "entry_date", "exit_date", "exit_reason", "pnl"
+            ])
+        log_sheet.append_row([
+            trade.get("symbol", ""),
+            trade.get("strategy", ""),
+            trade.get("entry", 0),
+            trade.get("exit_price", 0),
+            trade.get("shares", 0),
+            trade.get("entry_date", ""),
+            trade.get("exit_date", ""),
+            trade.get("exit_reason", ""),
+            round(trade.get("pnl", 0), 2),
+        ])
+        print(f"[PT] Trade logged to Sheets: {trade.get('symbol')} P&L ₹{trade.get('pnl', 0):+,.0f}")
+    except Exception as e:
+        print(f"[PT] Sheets trade log failed ({e}) — local JSON saved")
 
 
 def print_positions():

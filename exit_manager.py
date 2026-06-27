@@ -30,30 +30,12 @@ TRAIL_LOCK_PCT   = 0.5
 
 
 def get_current_price(symbol: str) -> float:
-    """Fetch current price from Groww API, fallback to yfinance."""
-    # Try Groww first
-    try:
-        from groww_client import GrowwClient
-        client = GrowwClient()
-        data = client.equityQuote(symbol)
-        if data:
-            price = float(data.get("close", 0) or data.get("ltp", 0) or data.get("lastPrice", 0))
-            if price > 0:
-                return price
-    except Exception as e:
-        print(f"  [{symbol}] Groww price fetch failed: {e}")
-
-    # Fallback to yfinance
-    try:
-        import yfinance as yf
-        ticker = yf.Ticker(f"{symbol}.NS")
-        hist = ticker.history(period="2d")
-        if not hist.empty:
-            return round(float(hist["Close"].iloc[-1]), 2)
-    except Exception as e:
-        print(f"  [{symbol}] yfinance fallback failed: {e}")
-
-    return 0.0
+    """Fetch current price from NSE API."""
+    from nse_price import get_ltp
+    price = get_ltp(symbol)
+    if price == 0:
+        print(f"  [{symbol}] NSE price fetch failed")
+    return price
 
 
 def trading_days_held(entry_date_str: str) -> int:
