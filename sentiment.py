@@ -1,7 +1,6 @@
 """
 Market sentiment filter — checks market conditions before placing any trades.
-Uses yfinance for ^NSEI (Nifty 50) and ^INDIAVIX data.
-Groww API has no index endpoint — yfinance is the reliable fallback.
+Uses NSE India API (allIndices) for VIX, Nifty 50, and A/D ratio.
 
 Scoring system:
   Green   = +1
@@ -9,32 +8,60 @@ Scoring system:
   Red     = -2
 
 Total score:
-  +2 to +3  → TRADE NORMALLY      (size_multiplier = 1.0)
-   0 to +1  → TRADE with 50% size (size_multiplier = 0.5)
-  -1 or below → SKIP ALL TRADES   (size_multiplier = 0.0)
+  +3      → TRADE NORMALLY      (size_multiplier = 1.0)
+   0 to +2 → TRADE with 50% size (size_multiplier = 0.5)
+  -1 or below → SKIP ALL TRADES  (size_multiplier = 0.0)
 """
-import yfinance as yf
+import requests
 
 # Thresholds
 VIX_GREEN    = 18.0
 VIX_RED      = 22.0
 NIFTY_GREEN  = -0.3   # % change
 NIFTY_RED    = -0.8
+AD_GREEN     = 1.5
+AD_RED       = 0.8
 GAP_DOWN_RED = -2.0   # % gap for individual stocks
 
+NSE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nseindia.com/",
+}
 
-def _pct_change(last: float, prev_close: float) -> float:
-    """Calculate % change from previous close."""
-    if prev_close and prev_close != 0:
-        return (last - prev_close) / prev_close * 100
-    return 0.0
 
-
-def check_vix() -> tuple:
-    """Check India VIX via yfinance ^INDIAVIX."""
+def get_nse_indices() -> list:
+    """Fetch all indices from NSE allIndices API."""
     try:
-        info = yf.Ticker("^INDIAVIX").fast_info
-        vix = float(info.get("lastPrice") or info.get("previousClose") or 0)
+        session = requests.Session()
+        session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=10)
+        r = session.get("https://www.nseindia.com/api/allIndices", headers=NSE_HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json().get("data", [])
+    except Exception as e:
+        print(f"[SENTIMENT] NSE allIndices failed: {e}")
+        return []
+
+
+def find_index(indices: list, name: str) -> dict:
+    """Find index by partial name match."""
+    name_upper = name.upper()
+    for idx in indices:
+        idx_name = str(idx.get("index", "") or idx.get("indexSymbol", "")).upper()
+        if name_upper in idx_name:
+            return idx
+    return {}
+
+
+def check_vix(indices: list) -> tuple:
+    """Check India VIX."""
+    try:
+        idx = find_index(indices, "VIX")
+        if not idx:
+            return 0, "VIX: Not found — skipping"
+
+        vix = float(idx.get("last", 0) or 0)
         if vix == 0:
             return 0, "VIX: Could not read value — skipping"
 
@@ -48,17 +75,14 @@ def check_vix() -> tuple:
         return 0, f"VIX: Error ({e}) — skipping"
 
 
-def check_nifty() -> tuple:
-    """Check Nifty 50 trend via yfinance ^NSEI."""
+def check_nifty(indices: list) -> tuple:
+    """Check Nifty 50 % change."""
     try:
-        info = yf.Ticker("^NSEI").fast_info
-        last       = float(info.get("lastPrice") or 0)
-        prev_close = float(info.get("previousClose") or info.get("regularMarketPreviousClose") or 0)
+        idx = find_index(indices, "NIFTY 50")
+        if not idx:
+            return 0, "Nifty: Not found — skipping"
 
-        if last == 0:
-            return 0, "Nifty: Could not read value — skipping"
-
-        change_pct = _pct_change(last, prev_close)
+        change_pct = float(idx.get("percentChange", 0) or 0)
 
         if change_pct >= NIFTY_GREEN:
             return 1, f"Nifty: {change_pct:+.2f}% ✅ Positive/flat"
@@ -70,8 +94,33 @@ def check_nifty() -> tuple:
         return 0, f"Nifty: Error ({e}) — skipping"
 
 
+def check_advance_decline(indices: list) -> tuple:
+    """Check A/D ratio from Nifty 50 data."""
+    try:
+        idx = find_index(indices, "NIFTY 50")
+        if not idx:
+            return 0, "A/D: Not found — skipping"
+
+        advances = float(idx.get("advances", 0) or 0)
+        declines = float(idx.get("declines", 0) or 0)
+
+        if advances == 0 or declines == 0:
+            return 0, "A/D: Data not available — skipping"
+
+        ratio = advances / declines
+
+        if ratio >= AD_GREEN:
+            return 1, f"A/D: {ratio:.2f} ✅ ({int(advances)} up / {int(declines)} down)"
+        elif ratio >= AD_RED:
+            return 0, f"A/D: {ratio:.2f} ⚠️ Mixed ({int(advances)} up / {int(declines)} down)"
+        else:
+            return -2, f"A/D: {ratio:.2f} ❌ Mostly falling ({int(advances)} up / {int(declines)} down)"
+    except Exception as e:
+        return 0, f"A/D: Error ({e}) — skipping"
+
+
 def check_stock_gap(symbol: str, entry_price: float, current_open: float) -> tuple:
-    """Check if individual stock has gapped down significantly at open."""
+    """Check if individual stock has gapped down at open."""
     if current_open <= 0 or entry_price <= 0:
         return 0, f"{symbol}: Gap unknown"
 
@@ -96,9 +145,19 @@ class MarketSentiment:
         print("\n📊 Running market sentiment checks...")
         print("─" * 50)
 
+        indices = get_nse_indices()
+        if not indices:
+            print("  ⚠️  NSE API unavailable — defaulting to REDUCE size")
+            return {
+                "score": 0, "decision": "REDUCE", "size_multiplier": 0.5,
+                "verdict": "⚠️ TRADE WITH 50% POSITION SIZE (NSE unavailable)",
+                "checks": [],
+            }
+
         checks = [
-            ("VIX",   check_vix()),
-            ("Nifty", check_nifty()),
+            ("VIX",   check_vix(indices)),
+            ("Nifty", check_nifty(indices)),
+            ("A/D",   check_advance_decline(indices)),
         ]
 
         total_score = 0
@@ -107,14 +166,10 @@ class MarketSentiment:
             self.checks.append({"name": name, "score": score, "message": message})
             print(f"  {message}")
 
-        # FII and A/D not available — noted explicitly
-        print("  FII: Not available via yfinance — skipping")
-        print("  A/D: Not available via yfinance — skipping")
-
         self.score = total_score
 
-        # Max possible score is now 2 (VIX + Nifty), so thresholds adjusted
-        if total_score >= 2:
+        # Max score = 3 (VIX + Nifty + A/D)
+        if total_score >= 3:
             self.decision = "TRADE"
             self.size_multiplier = 1.0
             verdict = "✅ TRADE NORMALLY"
@@ -128,7 +183,7 @@ class MarketSentiment:
             verdict = "❌ SKIP ALL TRADES TODAY"
 
         print("─" * 50)
-        print(f"  Total Score: {total_score}/2")
+        print(f"  Total Score: {total_score}/3")
         print(f"  Decision:    {verdict}")
         print("─" * 50)
 
@@ -141,9 +196,8 @@ class MarketSentiment:
         }
 
     def check_individual_stock(self, symbol: str, entry: float, current_open: float) -> tuple:
-        """Returns (approved: bool, message: str). Gap-down stocks are blocked."""
         score, message = check_stock_gap(symbol, entry, current_open)
-        approved = score >= 0  # blocks only gap-down (-2); allows caution (0) and green (1)
+        approved = score >= 0  # blocks gap-down (-2); allows caution (0) and green (1)
         return approved, message
 
 

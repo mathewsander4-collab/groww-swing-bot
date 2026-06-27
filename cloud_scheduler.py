@@ -161,6 +161,17 @@ def scheduler_loop():
     print(f"Time: {ist_now().strftime('%Y-%m-%d %H:%M')} IST")
     print("=" * 60)
 
+ # ── NSE connectivity test ──────────────────────────
+    try:
+        import requests
+        s = requests.Session()
+        s.get("https://www.nseindia.com", headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r = s.get("https://www.nseindia.com/api/allIndices", headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        print(f"NSE API test: {r.status_code} ✅" if r.status_code == 200 else f"NSE API test: {r.status_code} ❌")
+    except Exception as e:
+        print(f"NSE API test FAILED: {e}")
+    # ───────────────────────────────────────────────────
+
     auth_done         = False
     morning_done      = False
     eod_done          = False

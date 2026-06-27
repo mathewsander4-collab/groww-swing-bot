@@ -129,12 +129,14 @@ def execute_signals(signals: list, sentiment: dict):
         stop   = float(sig["stop"])
         target = float(sig["target"])
 
-        # Gap check via yfinance (get_quotes is broken on Groww API)
+        # Gap check via NSE API
         try:
-            import yfinance as yf
-            ticker = yf.Ticker(f"{symbol}.NS")
-            info   = ticker.fast_info
-            current_open = float(info.get("open") or info.get("lastPrice") or entry)
+            from sentiment import NSE_HEADERS
+            import requests
+            session = requests.Session()
+            session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=10)
+            r = session.get(f"https://www.nseindia.com/api/quote-equity?symbol={symbol}", headers=NSE_HEADERS, timeout=10)
+            current_open = float(r.json().get("priceInfo", {}).get("open", entry) or entry)
             gap_pct = (current_open - entry) / entry * 100
             if gap_pct < -2.0:
                 print(f"❌ {symbol} gapped down {gap_pct:.1f}% — skipping")
@@ -178,12 +180,16 @@ def check_positions():
     if not positions:
         return
     
+    from sentiment import NSE_HEADERS
+    import requests
+    session = requests.Session()
+    session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=10)
+
     for pos in positions:
         symbol = pos["symbol"]
         try:
-            import yfinance as yf
-            info = yf.Ticker(f"{symbol}.NS").fast_info
-            ltp  = float(info.get("lastPrice") or info.get("previousClose") or 0)
+            r   = session.get(f"https://www.nseindia.com/api/quote-equity?symbol={symbol}", headers=NSE_HEADERS, timeout=10)
+            ltp = float(r.json().get("priceInfo", {}).get("lastPrice", 0) or 0)
         except Exception:
             ltp = 0
 
