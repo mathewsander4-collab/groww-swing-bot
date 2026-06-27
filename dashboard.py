@@ -8,7 +8,7 @@ Run locally:
 """
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, jsonify
 
 app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), 'templates'))
@@ -135,7 +135,7 @@ def api_data():
             "win_rate":        win_rate,
             "total_trades":    len(trade_log),
         },
-        "last_updated": datetime.now().strftime("%H:%M:%S"),
+        "last_updated": datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%H:%M:%S IST"),
     })
 
 
