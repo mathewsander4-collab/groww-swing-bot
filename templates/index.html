@@ -8,354 +8,114 @@
 <title>SwingBot</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
-
   :root {
-    --bg:        #0a0f1e;
-    --surface:   #111827;
-    --border:    #1e2d45;
-    --text:      #e2e8f0;
-    --muted:     #64748b;
-    --green:     #10b981;
-    --red:       #ef4444;
-    --yellow:    #f59e0b;
-    --blue:      #3b82f6;
-    --accent:    #6366f1;
+    --bg:      #0a0f1e;
+    --surface: #111827;
+    --border:  #1e2d45;
+    --text:    #e2e8f0;
+    --muted:   #64748b;
+    --green:   #10b981;
+    --red:     #ef4444;
+    --yellow:  #f59e0b;
+    --blue:    #3b82f6;
+    --accent:  #6366f1;
   }
-
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-size: 14px; min-height: 100vh; padding-bottom: 80px; }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
-    font-size: 14px;
-    min-height: 100vh;
-    padding-bottom: 80px;
-  }
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+  .header-title { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 600; color: var(--accent); }
+  .header-time { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
+  .live-dot { display: inline-block; width: 7px; height: 7px; background: var(--green); border-radius: 50%; margin-right: 5px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
-  /* Header */
-  .header {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 14px 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-  .header-title {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--accent);
-    letter-spacing: 0.05em;
-  }
-  .header-time {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--muted);
-  }
-  .live-dot {
-    display: inline-block;
-    width: 7px; height: 7px;
-    background: var(--green);
-    border-radius: 50%;
-    margin-right: 5px;
-    animation: pulse 2s infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.3; }
-  }
-
-  /* Tabs */
-  .tabs {
-    display: flex;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    scrollbar-width: none;
-    position: sticky;
-    top: 53px;
-    z-index: 99;
-  }
+  .tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; position: sticky; top: 53px; z-index: 99; }
   .tabs::-webkit-scrollbar { display: none; }
-  .tab {
-    flex: 1;
-    min-width: 70px;
-    padding: 10px 8px;
-    text-align: center;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--muted);
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    white-space: nowrap;
-    transition: all 0.2s;
-  }
-  .tab.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
+  .tab { flex: 1; min-width: 70px; padding: 10px 8px; text-align: center; font-size: 11px; font-weight: 500; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: all 0.2s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-  /* Content */
   .content { padding: 12px; }
   .section { display: none; }
   .section.active { display: block; }
 
-  /* Summary cards */
-  .cards {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px;
-  }
-  .card-label {
-    font-size: 10px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 4px;
-  }
-  .card-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 20px;
-    font-weight: 600;
-  }
-  .card-value.green { color: var(--green); }
-  .card-value.red   { color: var(--red); }
-  .card-value.blue  { color: var(--blue); }
-  .card-value.white { color: var(--text); }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .card-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .card-value { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600; }
 
-  /* Sentiment bar */
-  .sentiment-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px;
-    margin-bottom: 12px;
-  }
-  .sentiment-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-  }
-  .sentiment-title {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-  }
-  .sentiment-badge {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 10px;
-    border-radius: 20px;
-  }
+  .sentiment-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .sentiment-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .sentiment-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .sentiment-badge { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
   .badge-trade  { background: rgba(16,185,129,0.15); color: var(--green); }
-  .badge-reduce { background: rgba(245,158,11,0.15); color: var(--yellow); }
-  .badge-skip   { background: rgba(239,68,68,0.15);  color: var(--red); }
-
-  .sentiment-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--border);
-  }
+  .badge-reduce { background: rgba(245,158,11,0.15);  color: var(--yellow); }
+  .badge-skip   { background: rgba(239,68,68,0.15);   color: var(--red); }
+  .sentiment-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
   .sentiment-row:last-child { border-bottom: none; }
   .sentiment-label { color: var(--muted); font-size: 12px; }
-  .sentiment-val   { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; }
-
-  /* Score bar */
-  .score-bar {
-    display: flex;
-    gap: 4px;
-    margin-top: 10px;
-  }
-  .score-pip {
-    flex: 1;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--border);
-  }
+  .sentiment-val { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; }
+  .score-bar { display: flex; gap: 4px; margin-top: 10px; }
+  .score-pip { flex: 1; height: 4px; border-radius: 2px; background: var(--border); }
   .score-pip.filled { background: var(--green); }
   .score-pip.red    { background: var(--red); }
 
   /* Position cards */
-  .pos-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px;
-    margin-bottom: 8px;
-  }
-  .pos-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 8px;
-  }
-  .pos-symbol {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
-    font-weight: 600;
-  }
-  .pos-strategy {
-    font-size: 10px;
-    color: var(--muted);
-    text-transform: uppercase;
-    margin-top: 2px;
-  }
-  .pos-pnl {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
-    font-weight: 600;
-    text-align: right;
-  }
-  .pos-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 6px;
-  }
-  .pos-item-label {
-    font-size: 9px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .pos-item-val {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    margin-top: 2px;
-  }
+  .pos-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 8px; }
+  .pos-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .pos-symbol { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 600; }
+  .pos-meta { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-top: 2px; }
+  .pos-status { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 12px; }
+  .status-PROFIT  { background: rgba(16,185,129,0.15); color: var(--green); }
+  .status-LOSS    { background: rgba(239,68,68,0.15);  color: var(--red); }
+  .status-TARGET  { background: rgba(16,185,129,0.2);  color: var(--green); }
+  .status-STOP    { background: rgba(239,68,68,0.2);   color: var(--red); }
+  .status-HOLDING { background: rgba(99,102,241,0.15); color: var(--accent); }
 
-  /* Progress bar for position */
-  .pos-progress {
-    margin-top: 8px;
-    height: 3px;
-    background: var(--border);
-    border-radius: 2px;
-    overflow: hidden;
-  }
-  .pos-progress-fill {
-    height: 100%;
-    border-radius: 2px;
-    transition: width 0.3s;
-  }
+  /* Live price row */
+  .pos-price-row { display: flex; justify-content: space-between; align-items: center; background: rgba(99,102,241,0.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+  .pos-ltp-label { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+  .pos-ltp { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 600; color: var(--text); }
+  .pos-pnl { text-align: right; }
+  .pos-pnl-val { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 600; }
+  .pos-pnl-pct { font-size: 11px; margin-top: 2px; }
+
+  .pos-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .pos-item-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .pos-item-val { font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-top: 2px; }
+
+  /* Progress bar */
+  .pos-progress-wrap { margin-top: 10px; }
+  .pos-progress-labels { display: flex; justify-content: space-between; font-size: 9px; color: var(--muted); margin-bottom: 4px; }
+  .pos-progress { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; position: relative; }
+  .pos-progress-fill { height: 100%; border-radius: 2px; transition: width 0.5s; }
+  .pos-progress-entry { position: absolute; top: -2px; height: 8px; width: 2px; background: var(--text); border-radius: 1px; }
 
   /* Signal cards */
-  .sig-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 10px;
-    padding: 12px;
-    margin-bottom: 8px;
-  }
-  .sig-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-  .sig-symbol {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
-    font-weight: 600;
-  }
-  .sig-rr {
-    font-size: 11px;
-    color: var(--accent);
-    font-weight: 600;
-  }
-  .sig-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 6px;
-  }
-  .sig-reason {
-    margin-top: 8px;
-    font-size: 11px;
-    color: var(--muted);
-    font-style: italic;
-  }
+  .sig-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 12px; margin-bottom: 8px; }
+  .sig-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .sig-symbol { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600; }
+  .sig-rr { font-size: 11px; color: var(--accent); font-weight: 600; }
+  .sig-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .sig-reason { margin-top: 8px; font-size: 11px; color: var(--muted); font-style: italic; }
 
-  /* Trade log table */
-  .trade-row {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
-    margin-bottom: 6px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .trade-symbol {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    font-weight: 600;
-  }
-  .trade-meta {
-    font-size: 10px;
-    color: var(--muted);
-    margin-top: 2px;
-  }
-  .trade-pnl {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    font-weight: 600;
-    text-align: right;
-  }
-  .trade-reason {
-    font-size: 10px;
-    color: var(--muted);
-    margin-top: 2px;
-    text-align: right;
-  }
+  /* Trade rows */
+  .trade-row { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+  .trade-symbol { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; }
+  .trade-meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .trade-pnl { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; text-align: right; }
+  .trade-reason { font-size: 10px; color: var(--muted); margin-top: 2px; text-align: right; }
 
-  /* Empty state */
-  .empty {
-    text-align: center;
-    padding: 40px 20px;
-    color: var(--muted);
-  }
+  .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
   .empty-icon { font-size: 32px; margin-bottom: 8px; }
   .empty-text { font-size: 13px; }
+  .loading { text-align: center; padding: 60px 20px; color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
 
-  /* Loading */
-  .loading {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--muted);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-  }
-
-  /* Error */
-  .error-bar {
-    background: rgba(239,68,68,0.1);
-    border: 1px solid rgba(239,68,68,0.3);
-    color: var(--red);
-    padding: 8px 12px;
-    border-radius: 8px;
-    font-size: 12px;
-    margin-bottom: 10px;
-  }
-
-  .green { color: var(--green); }
-  .red   { color: var(--red); }
+  .green  { color: var(--green); }
+  .red    { color: var(--red); }
   .yellow { color: var(--yellow); }
-  .muted { color: var(--muted); }
+  .blue   { color: var(--blue); }
+  .white  { color: var(--text); }
+  .muted  { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -377,30 +137,20 @@
 
   <!-- OVERVIEW -->
   <div class="section active" id="tab-overview">
-    <div class="cards" id="summary-cards">
+    <div class="cards">
       <div class="card"><div class="card-label">Open Positions</div><div class="card-value blue" id="s-positions">—</div></div>
-      <div class="card"><div class="card-label">Total P&L</div><div class="card-value" id="s-pnl">—</div></div>
+      <div class="card"><div class="card-label">Live P&L</div><div class="card-value" id="s-livepnl">—</div></div>
       <div class="card"><div class="card-label">Win Rate</div><div class="card-value" id="s-winrate">—</div></div>
       <div class="card"><div class="card-label">Capital Used</div><div class="card-value white" id="s-capital">—</div></div>
     </div>
-
-    <div class="sentiment-card" id="sentiment-card">
+    <div class="sentiment-card">
       <div class="sentiment-header">
         <div class="sentiment-title">Market Sentiment</div>
         <div class="sentiment-badge" id="sentiment-badge">—</div>
       </div>
-      <div class="sentiment-row">
-        <div class="sentiment-label">India VIX</div>
-        <div class="sentiment-val" id="sent-vix">—</div>
-      </div>
-      <div class="sentiment-row">
-        <div class="sentiment-label">Nifty 50</div>
-        <div class="sentiment-val" id="sent-nifty">—</div>
-      </div>
-      <div class="sentiment-row">
-        <div class="sentiment-label">A/D Ratio</div>
-        <div class="sentiment-val" id="sent-ad">—</div>
-      </div>
+      <div class="sentiment-row"><div class="sentiment-label">India VIX</div><div class="sentiment-val" id="sent-vix">—</div></div>
+      <div class="sentiment-row"><div class="sentiment-label">Nifty 50</div><div class="sentiment-val" id="sent-nifty">—</div></div>
+      <div class="sentiment-row"><div class="sentiment-label">A/D Ratio</div><div class="sentiment-val" id="sent-ad">—</div></div>
       <div class="score-bar" id="score-bar"></div>
     </div>
   </div>
@@ -417,7 +167,7 @@
 
   <!-- TRADES -->
   <div class="section" id="tab-trades">
-    <div id="trades-list"><div class="loading">Loading trade log...</div></div>
+    <div id="trades-list"><div class="loading">Loading trades...</div></div>
   </div>
 
   <!-- P&L -->
@@ -428,68 +178,50 @@
 </div>
 
 <script>
-let data = null;
-
 function showTab(name) {
-  document.querySelectorAll('.tab').forEach((t, i) => {
-    const names = ['overview','positions','signals','trades','pnl'];
-    t.classList.toggle('active', names[i] === name);
-  });
+  const names = ['overview','positions','signals','trades','pnl'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', names[i]===name));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
 }
 
 function fmt(n) {
-  n = parseFloat(n) || 0;
-  return (n >= 0 ? '+' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', {maximumFractionDigits: 0});
+  n = parseFloat(n)||0;
+  return (n>=0?'+':'')+'\u20b9'+Math.abs(n).toLocaleString('en-IN',{maximumFractionDigits:0});
 }
-
-function fmtPrice(n) {
-  return '₹' + (parseFloat(n) || 0).toLocaleString('en-IN', {maximumFractionDigits: 2});
-}
-
-function colorClass(val) {
-  return parseFloat(val) >= 0 ? 'green' : 'red';
-}
+function fmtP(n) { return '\u20b9'+(parseFloat(n)||0).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2}); }
+function cc(v) { return parseFloat(v)>=0?'green':'red'; }
 
 function renderOverview(d) {
   const s = d.summary;
   document.getElementById('s-positions').textContent = s.open_positions;
-  const pnlEl = document.getElementById('s-pnl');
-  pnlEl.textContent = fmt(s.total_pnl);
-  pnlEl.className = 'card-value ' + colorClass(s.total_pnl);
+  const lp = document.getElementById('s-livepnl');
+  lp.textContent = fmt(s.live_pnl);
+  lp.className = 'card-value '+cc(s.live_pnl);
+  const wr = document.getElementById('s-winrate');
+  wr.textContent = s.win_rate+'%';
+  wr.className = 'card-value '+(s.win_rate>=50?'green':'yellow');
+  document.getElementById('s-capital').textContent = fmtP(s.total_invested);
 
-  const wrEl = document.getElementById('s-winrate');
-  wrEl.textContent = s.win_rate + '%';
-  wrEl.className = 'card-value ' + (s.win_rate >= 50 ? 'green' : 'yellow');
-
-  document.getElementById('s-capital').textContent = fmtPrice(s.total_invested);
-
-  // Sentiment
   const sent = d.sentiment;
-  if (sent.error) {
-    document.getElementById('sentiment-card').innerHTML = '<div class="error-bar">Sentiment unavailable: ' + sent.error + '</div>';
-    return;
-  }
-
+  if (sent.error) return;
   const badge = document.getElementById('sentiment-badge');
   badge.textContent = sent.decision;
-  badge.className = 'sentiment-badge badge-' + sent.decision.toLowerCase();
-
-  document.getElementById('sent-vix').textContent = sent.vix.toFixed(1);
-  document.getElementById('sent-vix').className = 'sentiment-val ' + (sent.vix < 18 ? 'green' : sent.vix < 22 ? 'yellow' : 'red');
-
-  document.getElementById('sent-nifty').textContent = (sent.nifty_chg >= 0 ? '+' : '') + sent.nifty_chg.toFixed(2) + '%';
-  document.getElementById('sent-nifty').className = 'sentiment-val ' + colorClass(sent.nifty_chg);
-
-  document.getElementById('sent-ad').textContent = sent.ad_ratio.toFixed(2) + ' (' + sent.advances + '↑ / ' + sent.declines + '↓)';
-  document.getElementById('sent-ad').className = 'sentiment-val ' + (sent.ad_ratio >= 1.5 ? 'green' : sent.ad_ratio >= 0.8 ? 'yellow' : 'red');
-
+  badge.className = 'sentiment-badge badge-'+sent.decision.toLowerCase();
+  const vixEl = document.getElementById('sent-vix');
+  vixEl.textContent = sent.vix.toFixed(1);
+  vixEl.className = 'sentiment-val '+(sent.vix<18?'green':sent.vix<22?'yellow':'red');
+  const nEl = document.getElementById('sent-nifty');
+  nEl.textContent = (sent.nifty_chg>=0?'+':'')+sent.nifty_chg.toFixed(2)+'%';
+  nEl.className = 'sentiment-val '+cc(sent.nifty_chg);
+  const adEl = document.getElementById('sent-ad');
+  adEl.textContent = sent.ad_ratio.toFixed(2)+' ('+sent.advances+'\u2191 / '+sent.declines+'\u2193)';
+  adEl.className = 'sentiment-val '+(sent.ad_ratio>=1.5?'green':sent.ad_ratio>=0.8?'yellow':'red');
   const bar = document.getElementById('score-bar');
   bar.innerHTML = '';
-  for (let i = 0; i < 3; i++) {
-    const pip = document.createElement('div');
-    pip.className = 'score-pip' + (i < sent.score ? ' filled' : sent.score < 0 ? ' red' : '');
+  for(let i=0;i<3;i++){
+    const pip=document.createElement('div');
+    pip.className='score-pip'+(i<sent.score?' filled':sent.score<0?' red':'');
     bar.appendChild(pip);
   }
 }
@@ -497,50 +229,64 @@ function renderOverview(d) {
 function renderPositions(positions) {
   const el = document.getElementById('positions-list');
   if (!positions.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-text">No open positions</div></div>';
+    el.innerHTML='<div class="empty"><div class="empty-icon">📭</div><div class="empty-text">No open positions</div></div>';
     return;
   }
   el.innerHTML = positions.map(p => {
-    const entry  = parseFloat(p.entry || 0);
-    const stop   = parseFloat(p.stop || 0);
-    const target = parseFloat(p.target || 0);
-    const shares = parseInt(p.shares || 0);
-    const risk   = entry - stop;
-    const reward = target - entry;
-    const rr     = risk > 0 ? (reward / risk).toFixed(1) : '—';
+    const entry  = parseFloat(p.entry||0);
+    const stop   = parseFloat(p.stop||0);
+    const target = parseFloat(p.target||0);
+    const ltp    = parseFloat(p.ltp||0);
+    const pnl    = parseFloat(p.pnl||0);
+    const pnlPct = parseFloat(p.pnl_pct||0);
+    const shares = parseInt(p.shares||0);
+    const status = p.status||'HOLDING';
 
-    // Progress from stop to target (entry as reference)
-    const progress = risk + reward > 0 ? Math.round((entry - stop) / (target - stop) * 100) : 50;
+    // Progress: position of LTP between stop and target
+    const range = target - stop;
+    const ltpProgress = range > 0 ? Math.min(100, Math.max(0, (ltp - stop) / range * 100)) : 50;
+    const entryProgress = range > 0 ? Math.min(100, Math.max(0, (entry - stop) / range * 100)) : 50;
+
+    const rr = (entry-stop)>0 ? ((target-entry)/(entry-stop)).toFixed(1) : '—';
 
     return `
     <div class="pos-card">
       <div class="pos-header">
         <div>
-          <div class="pos-symbol">${p.symbol || '—'}</div>
-          <div class="pos-strategy">${p.strategy || ''} · ${p.entry_date || ''}</div>
+          <div class="pos-symbol">${p.symbol||'—'}</div>
+          <div class="pos-meta">${p.strategy||''} · ${p.entry_date||''} · ${shares} shares</div>
         </div>
+        <div class="pos-status status-${status}">${status}</div>
+      </div>
+
+      <div class="pos-price-row">
         <div>
-          <div class="pos-pnl muted">R:R ${rr}</div>
-          <div class="pos-strategy" style="text-align:right">${shares} shares</div>
+          <div class="pos-ltp-label">Live Price</div>
+          <div class="pos-ltp">${ltp ? fmtP(ltp) : '—'}</div>
+        </div>
+        <div class="pos-pnl">
+          <div class="pos-pnl-val ${cc(pnl)}">${ltp ? fmt(pnl) : '—'}</div>
+          <div class="pos-pnl-pct ${cc(pnlPct)}">${ltp ? (pnlPct>=0?'+':'')+pnlPct.toFixed(2)+'%' : ''}</div>
         </div>
       </div>
+
       <div class="pos-grid">
-        <div>
-          <div class="pos-item-label">Entry</div>
-          <div class="pos-item-val">${fmtPrice(entry)}</div>
-        </div>
-        <div>
-          <div class="pos-item-label">Stop</div>
-          <div class="pos-item-val red">${fmtPrice(stop)}</div>
-        </div>
-        <div>
-          <div class="pos-item-label">Target</div>
-          <div class="pos-item-val green">${fmtPrice(target)}</div>
-        </div>
+        <div><div class="pos-item-label">Entry</div><div class="pos-item-val">${fmtP(entry)}</div></div>
+        <div><div class="pos-item-label">Stop</div><div class="pos-item-val red">${fmtP(stop)}</div></div>
+        <div><div class="pos-item-label">Target</div><div class="pos-item-val green">${fmtP(target)}</div></div>
+        <div><div class="pos-item-label">R:R</div><div class="pos-item-val">${rr}x</div></div>
+        <div><div class="pos-item-label">Invested</div><div class="pos-item-val">${fmtP(p.invested||entry*shares)}</div></div>
+        <div><div class="pos-item-label">Shares</div><div class="pos-item-val">${shares}</div></div>
       </div>
-      <div class="pos-progress">
-        <div class="pos-progress-fill" style="width:${progress}%; background: var(--accent)"></div>
-      </div>
+
+      ${ltp ? `
+      <div class="pos-progress-wrap">
+        <div class="pos-progress-labels"><span class="red">${fmtP(stop)}</span><span class="green">${fmtP(target)}</span></div>
+        <div class="pos-progress">
+          <div class="pos-progress-fill" style="width:${ltpProgress}%;background:${pnl>=0?'var(--green)':'var(--red)'}"></div>
+          <div class="pos-progress-entry" style="left:${entryProgress}%"></div>
+        </div>
+      </div>` : ''}
     </div>`;
   }).join('');
 }
@@ -548,55 +294,29 @@ function renderPositions(positions) {
 function renderSignals(signals) {
   const el = document.getElementById('signals-list');
   if (!signals.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">🔍</div><div class="empty-text">No signals yet — next scan at 3:45 PM</div></div>';
+    el.innerHTML='<div class="empty"><div class="empty-icon">🔍</div><div class="empty-text">No signals — next scan at 3:45 PM</div></div>';
     return;
   }
   el.innerHTML = signals.map(s => {
-    const entry  = parseFloat(s['Entry ₹'] || s.entry || 0);
-    const stop   = parseFloat(s['Stop ₹']  || s.stop  || 0);
-    const target = parseFloat(s['Target ₹']|| s.target|| 0);
-    const risk   = entry - stop;
-    const reward = target - entry;
-    const rr     = risk > 0 ? (reward / risk).toFixed(1) : '—';
-    const shares = parseInt(s['Shares'] || s.shares || 0);
-    const capital= parseFloat(s['Capital ₹'] || s.capital_used || 0);
-
+    const entry  = parseFloat(s['Entry \u20b9']||s.entry||0);
+    const stop   = parseFloat(s['Stop \u20b9'] ||s.stop ||0);
+    const target = parseFloat(s['Target \u20b9']||s.target||0);
+    const rr = (entry-stop)>0 ? ((target-entry)/(entry-stop)).toFixed(1) : '—';
     return `
     <div class="sig-card">
       <div class="sig-header">
-        <div>
-          <div class="sig-symbol">${s['Symbol'] || s.symbol || '—'}</div>
-          <div class="pos-strategy">${s['Strategy'] || s.strategy || ''}</div>
-        </div>
+        <div><div class="sig-symbol">${s['Symbol']||s.symbol||'—'}</div><div class="pos-meta">${s['Strategy']||s.strategy||''}</div></div>
         <div class="sig-rr">R:R ${rr}x</div>
       </div>
       <div class="sig-grid">
-        <div>
-          <div class="pos-item-label">Entry</div>
-          <div class="pos-item-val">${fmtPrice(entry)}</div>
-        </div>
-        <div>
-          <div class="pos-item-label">Stop</div>
-          <div class="pos-item-val red">${fmtPrice(stop)}</div>
-        </div>
-        <div>
-          <div class="pos-item-label">Target</div>
-          <div class="pos-item-val green">${fmtPrice(target)}</div>
-        </div>
-        <div>
-          <div class="pos-item-label">Shares</div>
-          <div class="pos-item-val">${shares}</div>
-        </div>
-        <div>
-          <div class="pos-item-label">Capital</div>
-          <div class="pos-item-val">${fmtPrice(capital)}</div>
-        </div>
-        <div>
-          <div class="pos-item-label">Risk %</div>
-          <div class="pos-item-val">${parseFloat(s['Risk %'] || s.risk_pct || 0).toFixed(2)}%</div>
-        </div>
+        <div><div class="pos-item-label">Entry</div><div class="pos-item-val">${fmtP(entry)}</div></div>
+        <div><div class="pos-item-label">Stop</div><div class="pos-item-val red">${fmtP(stop)}</div></div>
+        <div><div class="pos-item-label">Target</div><div class="pos-item-val green">${fmtP(target)}</div></div>
+        <div><div class="pos-item-label">Shares</div><div class="pos-item-val">${s['Shares']||s.shares||0}</div></div>
+        <div><div class="pos-item-label">Capital</div><div class="pos-item-val">${fmtP(s['Capital \u20b9']||s.capital_used||0)}</div></div>
+        <div><div class="pos-item-label">Risk %</div><div class="pos-item-val">${parseFloat(s['Risk %']||s.risk_pct||0).toFixed(2)}%</div></div>
       </div>
-      <div class="sig-reason">${s['Reason'] || s.reason || ''}</div>
+      <div class="sig-reason">${s['Reason']||s.reason||''}</div>
     </div>`;
   }).join('');
 }
@@ -604,21 +324,14 @@ function renderSignals(signals) {
 function renderTrades(trades) {
   const el = document.getElementById('trades-list');
   if (!trades.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No closed trades yet</div></div>';
+    el.innerHTML='<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No closed trades yet</div></div>';
     return;
   }
-  el.innerHTML = [...trades].reverse().map(t => {
-    const pnl = parseFloat(t.pnl || 0);
-    return `
-    <div class="trade-row">
-      <div>
-        <div class="trade-symbol">${t.symbol || '—'}</div>
-        <div class="trade-meta">${t.entry_date || ''} → ${t.exit_date || ''} · ${t.strategy || ''}</div>
-      </div>
-      <div>
-        <div class="trade-pnl ${colorClass(pnl)}">${fmt(pnl)}</div>
-        <div class="trade-reason">${t.exit_reason || ''}</div>
-      </div>
+  el.innerHTML=[...trades].reverse().map(t=>{
+    const pnl=parseFloat(t.pnl||0);
+    return `<div class="trade-row">
+      <div><div class="trade-symbol">${t.symbol||'—'}</div><div class="trade-meta">${t.entry_date||''} → ${t.exit_date||''} · ${t.strategy||''}</div></div>
+      <div><div class="trade-pnl ${cc(pnl)}">${fmt(pnl)}</div><div class="trade-reason">${t.exit_reason||''}</div></div>
     </div>`;
   }).join('');
 }
@@ -626,24 +339,14 @@ function renderTrades(trades) {
 function renderPnL(daily) {
   const el = document.getElementById('pnl-list');
   if (!daily.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">📈</div><div class="empty-text">No P&L data yet</div></div>';
+    el.innerHTML='<div class="empty"><div class="empty-icon">📈</div><div class="empty-text">No P&L data yet</div></div>';
     return;
   }
-
-  let running = 0;
-  el.innerHTML = [...daily].reverse().map(d => {
-    const pnl = parseFloat(d['Total P&L ₹'] || 0);
-    running += pnl;
-    return `
-    <div class="trade-row">
-      <div>
-        <div class="trade-symbol" style="font-size:13px">${d['Date'] || '—'}</div>
-        <div class="trade-meta">${d['Open Positions'] || 0} positions · ${d['Mode'] || ''}</div>
-      </div>
-      <div>
-        <div class="trade-pnl ${colorClass(pnl)}" style="font-size:13px">${fmt(pnl)}</div>
-        <div class="trade-reason ${colorClass(d['P&L %'])}">${d['P&L %'] || ''}</div>
-      </div>
+  el.innerHTML=[...daily].reverse().map(d=>{
+    const pnl=parseFloat(d['Total P&L \u20b9']||0);
+    return `<div class="trade-row">
+      <div><div class="trade-symbol" style="font-size:13px">${d['Date']||'—'}</div><div class="trade-meta">${d['Open Positions']||0} positions · ${d['Mode']||''}</div></div>
+      <div><div class="trade-pnl ${cc(pnl)}" style="font-size:13px">${fmt(pnl)}</div><div class="trade-reason ${cc(d['P&L %'])}">${d['P&L %']||''}</div></div>
     </div>`;
   }).join('');
 }
@@ -651,19 +354,16 @@ function renderPnL(daily) {
 async function fetchData() {
   try {
     const res = await fetch('/api/data');
-    data = await res.json();
+    const data = await res.json();
     document.getElementById('last-updated').textContent = data.last_updated;
     renderOverview(data);
-    renderPositions(data.positions || []);
-    renderSignals(data.signals || []);
-    renderTrades(data.trade_log || []);
-    renderPnL(data.daily_pnl || []);
-  } catch (e) {
-    console.error('Fetch failed:', e);
-  }
+    renderPositions(data.positions||[]);
+    renderSignals(data.signals||[]);
+    renderTrades(data.trade_log||[]);
+    renderPnL(data.daily_pnl||[]);
+  } catch(e) { console.error('Fetch failed:',e); }
 }
 
-// Initial load + refresh every 60 seconds
 fetchData();
 setInterval(fetchData, 60000);
 </script>
