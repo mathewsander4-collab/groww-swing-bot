@@ -20,21 +20,35 @@ NSE_HEADERS = {
 }
 
 _nse_session = None
+_session_time = 0
+SESSION_TTL   = 300  # refresh session every 5 minutes
+
 
 def get_nse_session():
-    global _nse_session
-    if _nse_session is None:
+    global _nse_session, _session_time
+    import time
+    if _nse_session is None or (time.time() - _session_time) > SESSION_TTL:
         _nse_session = requests.Session()
         _nse_session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=10)
+        _session_time = time.time()
     return _nse_session
 
 
 def get_live_price(symbol: str) -> float:
     """Fetch live LTP from NSE for a stock symbol."""
+    global _nse_session, _session_time
+    import time
     try:
         s = get_nse_session()
         r = s.get(f"https://www.nseindia.com/api/quote-equity?symbol={symbol}",
                   headers=NSE_HEADERS, timeout=10)
+        if r.status_code != 200 or not r.text.strip():
+            # Session expired — force refresh and retry
+            _nse_session = None
+            _session_time = 0
+            s = get_nse_session()
+            r = s.get(f"https://www.nseindia.com/api/quote-equity?symbol={symbol}",
+                      headers=NSE_HEADERS, timeout=10)
         price_info = r.json().get("priceInfo", {})
         return float(price_info.get("lastPrice", 0) or price_info.get("close", 0) or 0)
     except Exception:

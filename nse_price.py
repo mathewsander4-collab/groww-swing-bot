@@ -11,26 +11,41 @@ NSE_HEADERS = {
     "Referer": "https://www.nseindia.com/",
 }
 
-_session = None
+_session      = None
+_session_time = 0
+SESSION_TTL   = 300  # refresh every 5 minutes
 
 
 def _get_session():
-    """Get or create a persistent NSE session."""
-    global _session
-    if _session is None:
+    """Get or create a persistent NSE session, refreshing every 5 min."""
+    global _session, _session_time
+    import time
+    if _session is None or (time.time() - _session_time) > SESSION_TTL:
         _session = requests.Session()
         _session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=10)
+        _session_time = time.time()
     return _session
 
 
 def fetch_nse_price(symbol: str) -> dict:
     """Fetch price data for a stock from NSE quote-equity API."""
+    global _session, _session_time
+    import time
     try:
         session = _get_session()
         r = session.get(
             f"https://www.nseindia.com/api/quote-equity?symbol={symbol}",
             headers=NSE_HEADERS, timeout=10
         )
+        if r.status_code != 200 or not r.text.strip():
+            # Session expired — force refresh and retry
+            _session = None
+            _session_time = 0
+            session = _get_session()
+            r = session.get(
+                f"https://www.nseindia.com/api/quote-equity?symbol={symbol}",
+                headers=NSE_HEADERS, timeout=10
+            )
         data = r.json()
         price_info = data.get("priceInfo", {})
 
