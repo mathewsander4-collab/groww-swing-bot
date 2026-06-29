@@ -1,31 +1,28 @@
 """
 Cloud Scheduler — runs 24/7 on Railway.
-Automatically handles all trading tasks at the right times.
 
 Schedule:
   6:00 AM  → Auto login via TOTP
   9:10 AM  → Exit manager + sentiment + place orders
   9:15 AM - 3:30 PM → Monitor positions every 15 min
   3:45 PM  → EOD report + scan + sync sheets
-  9:00 PM  → Evening sync (prices + sheets)
+  9:00 PM  → Evening sync
 """
 import os
 import time
-from datetime import datetime, date
+from datetime import datetime
 
 import config
 from notifier import notify_error
 
 
 def ist_now():
-    """Get current IST time."""
     from datetime import timezone, timedelta
-    ist = timezone(timedelta(hours=5, minutes=30))
-    return datetime.now(ist)
+    return datetime.now(timezone(timedelta(hours=5, minutes=30)))
 
 
 def is_market_day() -> bool:
-    return ist_now().weekday() < 5  # Mon-Fri
+    return ist_now().weekday() < 5
 
 
 def run_auth():
@@ -45,26 +42,28 @@ def run_auth():
 def run_morning_trading():
     print(f"[{ist_now().strftime('%H:%M')}] Running morning trading session...")
 
-    # Step 1: Run exit checks on existing positions
+    # Step 1: Exit checks on existing positions
     try:
         from exit_manager import run_exit_checks
         run_exit_checks(dry_run=False)
     except Exception as e:
         print(f"Exit manager error: {e}")
 
-    # Step 2: Check sentiment before placing new trades
+    # Step 2: Sentiment check
+    sentiment = {"decision": "REDUCE", "size_multiplier": 0.5, "verdict": "DEFAULT"}
     try:
         from sentiment import run_sentiment_check
         sentiment = run_sentiment_check()
         print(f"[SENTIMENT] Decision: {sentiment['verdict']}")
     except Exception as e:
         print(f"Sentiment check error: {e} — defaulting to REDUCE")
-        sentiment = {"decision": "REDUCE", "size_multiplier": 0.5}
 
-    # Step 3: Place trades — pass pre-computed sentiment (no double check in trader.py)
+    # Step 3: Place trades
     try:
-        from trader import run_morning_session
-        run_morning_session(sentiment=sentiment)
+        from trader import load_latest_signals, execute_signals
+        signals = load_latest_signals()
+        print(f"Loaded {len(signals)} signals from last scan")
+        execute_signals(signals, sentiment)
     except Exception as e:
         print(f"Trading error: {e}")
         notify_error(f"Morning trading failed: {e}")
@@ -75,8 +74,11 @@ def run_position_monitor():
     try:
         from trader import check_positions
         check_positions()
+    except Exception as e:
+        print(f"Position check error: {e}")
 
-        # Sync live prices to Google Sheets
+    # Sync live prices to Sheets
+    try:
         from eod_report import fetch_price
         from sheets import get_client, sync_positions
         import position_tracker as pt
@@ -87,19 +89,17 @@ def run_position_monitor():
             for pos in positions:
                 data = fetch_price(pos["symbol"])
                 prices[pos["symbol"]] = data.get("close", 0)
-
-            client = get_client()
+            client   = get_client()
             workbook = client.open_by_key(config.GOOGLE_SHEET_ID)
             sync_positions(workbook, prices)
             print("✅ Positions synced to Sheets")
     except Exception as e:
-        print(f"Monitor error: {e}")
+        print(f"Sheets sync error: {e}")
 
 
 def run_eod():
     print(f"[{ist_now().strftime('%H:%M')}] Running EOD tasks...")
 
-    # EOD report email
     try:
         from eod_report import generate_report
         from notifier import send_email
@@ -112,8 +112,7 @@ def run_eod():
     except Exception as e:
         print(f"EOD report error: {e}")
 
-    # Evening scan + sync directly to Sheets (don't rely on CSV file)
-    scan_results = None
+    # Run scanner
     try:
         from scanner import run_scan, print_report
         scan_results = run_scan()
@@ -121,16 +120,15 @@ def run_eod():
     except Exception as e:
         print(f"Scanner error: {e}")
 
-    # Sync all sheets — pass scan_results directly so Signals tab is always fresh
+    # Sync all sheets
     try:
         from sheets import sync_all
-        sync_all(scan_results=scan_results)
+        sync_all()
     except Exception as e:
         print(f"Sheets sync error: {e}")
 
 
 def run_evening_sync():
-    """9 PM — lightweight sync of current prices and sheets."""
     print(f"[{ist_now().strftime('%H:%M')}] Running evening sync...")
     try:
         from eod_report import fetch_price
@@ -143,8 +141,7 @@ def run_evening_sync():
             for pos in positions:
                 data = fetch_price(pos["symbol"])
                 prices[pos["symbol"]] = data.get("close", 0)
-
-            client = get_client()
+            client   = get_client()
             workbook = client.open_by_key(config.GOOGLE_SHEET_ID)
             sync_positions(workbook, prices)
             print("✅ Evening sync complete")
@@ -172,39 +169,35 @@ def scheduler_loop():
         now  = ist_now()
         hhmm = now.hour * 100 + now.minute
 
-        # Reset all flags on new calendar day (date-based, not hhmm==0)
+        # Reset flags on new day
         if now.date() != current_date:
             auth_done = morning_done = eod_done = evening_sync_done = False
             last_monitor = 0
             current_date = now.date()
-            print(f"[{now.strftime('%H:%M')}] New day ({current_date}) — flags reset")
+            print(f"[{now.strftime('%H:%M')}] New day — flags reset")
 
         if not is_market_day():
             time.sleep(60)
             continue
 
-        # 6:00 AM — Auto login
+        # 6:00 AM — Auth
         if hhmm >= 600 and not auth_done:
             auth_done = run_auth()
 
-        # 9:10 AM — Morning trading (only if auth succeeded)
+        # 9:10 AM — Morning session
         elif hhmm >= 910 and hhmm < 930 and not morning_done:
-            if auth_done:
-                run_morning_trading()
-                morning_done = True
-            else:
-                # Auth may have failed; retry once
-                print(f"[{now.strftime('%H:%M')}] Auth not done — retrying before morning session")
+            if not auth_done:
                 auth_done = run_auth()
+            run_morning_trading()
+            morning_done = True
 
-        # 9:15 AM - 3:30 PM — Monitor every 15 minutes
+        # 9:15 AM - 3:30 PM — Monitor every 15 min
         elif hhmm >= 915 and hhmm <= 1530:
-            current_time = time.time()
-            if current_time - last_monitor >= 900:  # 15 minutes
+            if time.time() - last_monitor >= 900:
                 run_position_monitor()
-                last_monitor = current_time
+                last_monitor = time.time()
 
-        # 3:45 PM — EOD tasks
+        # 3:45 PM — EOD
         elif hhmm >= 1545 and not eod_done:
             run_eod()
             eod_done = True
@@ -214,17 +207,15 @@ def scheduler_loop():
             run_evening_sync()
             evening_sync_done = True
 
-        time.sleep(30)  # check every 30 seconds
+        time.sleep(30)
 
 
 if __name__ == "__main__":
     import threading
 
-    # Run scheduler in background thread
     scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
     scheduler_thread.start()
 
-    # Run Flask in main thread — Railway needs web server as main process
     try:
         from dashboard import app
         port = int(os.environ.get("PORT", 5000))
