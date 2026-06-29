@@ -1,83 +1,55 @@
 """
-NSE price fetcher — shared utility used by eod_report, exit_manager, trader.
-Single NSE session reused across calls for efficiency.
+Price fetcher — uses Groww get_historical_candles for individual stock prices.
+NSE quote-equity API is blocked (403). Groww historical works fine.
 """
-import requests
-
-NSE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.nseindia.com/",
-}
-
-_session      = None
-_session_time = 0
-SESSION_TTL   = 300  # refresh every 5 minutes
-
-
-def _get_session():
-    """Get or create a persistent NSE session, refreshing every 5 min."""
-    global _session, _session_time
-    import time
-    if _session is None or (time.time() - _session_time) > SESSION_TTL:
-        _session = requests.Session()
-        _session.get("https://www.nseindia.com", headers=NSE_HEADERS, timeout=10)
-        _session_time = time.time()
-    return _session
+from datetime import datetime, timedelta
 
 
 def fetch_nse_price(symbol: str) -> dict:
-    """Fetch price data for a stock from NSE quote-equity API."""
-    global _session, _session_time
-    import time
+    """Fetch latest price for a stock using Groww historical candles."""
     try:
-        session = _get_session()
-        r = session.get(
-            f"https://www.nseindia.com/api/quote-equity?symbol={symbol}",
-            headers=NSE_HEADERS, timeout=10
-        )
-        if r.status_code != 200 or not r.text.strip():
-            # Session expired — force refresh and retry
-            _session = None
-            _session_time = 0
-            session = _get_session()
-            r = session.get(
-                f"https://www.nseindia.com/api/quote-equity?symbol={symbol}",
-                headers=NSE_HEADERS, timeout=10
-            )
-        data = r.json()
-        price_info = data.get("priceInfo", {})
+        from groww_client import GrowwClient
+        client    = GrowwClient()
+        to_date   = datetime.now().strftime("%Y-%m-%d")
+        from_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+        df = client.get_historical_candles(symbol, from_date, to_date, interval_minutes=1440)
 
-        close  = float(price_info.get("lastPrice", 0) or price_info.get("close", 0) or 0)
-        open_  = float(price_info.get("open", 0) or 0)
-        high   = float(price_info.get("intraDayHighLow", {}).get("max", 0) or 0)
-        low    = float(price_info.get("intraDayHighLow", {}).get("min", 0) or 0)
-        prev   = float(price_info.get("previousClose", 0) or open_ or 0)
-        volume = int(data.get("marketDeptOrderBook", {}).get("totalSellQuantity", 0) or 0)
+        if df is None or df.empty:
+            return {"error": "No data from Groww"}
+
+        df.columns = [c.lower() for c in df.columns]
+        latest = df.iloc[-1]
+        prev   = df.iloc[-2] if len(df) > 1 else latest
+
+        close      = float(latest.get("close", 0) or 0)
+        open_      = float(latest.get("open",  0) or 0)
+        high       = float(latest.get("high",  0) or 0)
+        low        = float(latest.get("low",   0) or 0)
+        volume     = int(latest.get("volume",  0) or 0)
+        prev_close = float(prev.get("close",   0) or 0)
 
         if close == 0:
             return {"error": "Close price is 0"}
 
-        change     = close - prev
-        change_pct = (change / prev * 100) if prev else 0
+        change     = close - prev_close
+        change_pct = round(change / prev_close * 100, 2) if prev_close else 0
 
         return {
             "open":       round(open_, 2),
             "high":       round(high, 2),
             "low":        round(low, 2),
             "close":      round(close, 2),
-            "prev_close": round(prev, 2),
+            "prev_close": round(prev_close, 2),
             "change":     round(change, 2),
-            "change_pct": round(change_pct, 2),
+            "change_pct": change_pct,
             "volume":     volume,
-            "source":     "NSE API"
+            "source":     "Groww API"
         }
     except Exception as e:
         return {"error": str(e)}
 
 
 def get_ltp(symbol: str) -> float:
-    """Quick last traded price fetch. Returns 0 on failure."""
+    """Quick last traded price. Returns 0 on failure."""
     result = fetch_nse_price(symbol)
     return result.get("close", 0)

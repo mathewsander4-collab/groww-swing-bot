@@ -35,22 +35,10 @@ def get_nse_session():
 
 
 def get_live_price(symbol: str) -> float:
-    """Fetch live LTP from NSE for a stock symbol."""
-    global _nse_session, _session_time
-    import time
+    """Fetch latest price using Groww historical candles (NSE quote-equity is 403 blocked)."""
     try:
-        s = get_nse_session()
-        r = s.get(f"https://www.nseindia.com/api/quote-equity?symbol={symbol}",
-                  headers=NSE_HEADERS, timeout=10)
-        if r.status_code != 200 or not r.text.strip():
-            # Session expired — force refresh and retry
-            _nse_session = None
-            _session_time = 0
-            s = get_nse_session()
-            r = s.get(f"https://www.nseindia.com/api/quote-equity?symbol={symbol}",
-                      headers=NSE_HEADERS, timeout=10)
-        price_info = r.json().get("priceInfo", {})
-        return float(price_info.get("lastPrice", 0) or price_info.get("close", 0) or 0)
+        from nse_price import get_ltp
+        return get_ltp(symbol)
     except Exception:
         return 0.0
 
