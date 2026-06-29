@@ -15,83 +15,12 @@ import position_tracker as pt
 from notifier import send_email
 
 
-def fetch_groww_price(symbol: str) -> dict:
-    """Fetch today's price from Groww API."""
-    try:
-        from groww_client import GrowwClient
-        client = GrowwClient()
-        data   = client.equityQuote(symbol)
-        if not data:
-            return {"error": "Empty response"}
-
-        close  = float(data.get("close", 0) or data.get("ltp", 0) or data.get("lastPrice", 0))
-        open_  = float(data.get("open", 0))
-        high   = float(data.get("high", 0) or data.get("dayHigh", 0))
-        low    = float(data.get("low", 0)  or data.get("dayLow", 0))
-        volume = int(data.get("volume", 0) or data.get("totalTradedVolume", 0))
-        prev_close = float(data.get("previousClose", 0) or open_)
-
-        if close == 0:
-            return {"error": "Close price is 0"}
-
-        change     = close - prev_close
-        change_pct = (change / prev_close * 100) if prev_close else 0
-
-        return {
-            "open":       round(open_, 2),
-            "high":       round(high, 2),
-            "low":        round(low, 2),
-            "close":      round(close, 2),
-            "prev_close": round(prev_close, 2),
-            "change":     round(change, 2),
-            "change_pct": round(change_pct, 2),
-            "volume":     volume,
-            "source":     "Groww API"
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def fetch_yahoo_price(symbol: str) -> dict:
-    """Fallback: fetch from Yahoo Finance."""
-    try:
-        import yfinance as yf
-        ticker = yf.Ticker(f"{symbol}.NS")
-        hist   = ticker.history(period="7d")
-        if hist.empty:
-            return {"error": "No data from Yahoo"}
-
-        hist.columns = [str(c).lower().strip() for c in hist.columns]
-        hist = hist.dropna(subset=["close"])
-        if hist.empty:
-            return {"error": "All NaN from Yahoo"}
-
-        today      = hist.iloc[-1]
-        prev       = hist.iloc[-2] if len(hist) > 1 else today
-        latest_dt  = hist.index[-1].date() if hasattr(hist.index[-1], "date") else hist.index[-1]
-        stale      = " STALE" if latest_dt < date.today() else ""
-
-        return {
-            "open":       round(float(today["open"]), 2),
-            "high":       round(float(today["high"]), 2),
-            "low":        round(float(today["low"]), 2),
-            "close":      round(float(today["close"]), 2),
-            "prev_close": round(float(prev["close"]), 2),
-            "change":     round(float(today["close"]) - float(prev["close"]), 2),
-            "change_pct": round((float(today["close"]) - float(prev["close"])) / float(prev["close"]) * 100, 2),
-            "volume":     int(today["volume"]),
-            "source":     f"Yahoo Finance ({latest_dt}){stale}"
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
 def fetch_price(symbol: str) -> dict:
-    """Try Groww first, fallback to Yahoo Finance."""
-    result = fetch_groww_price(symbol)
-    if "error" in result or result.get("close", 0) == 0:
-        print(f"Groww failed for {symbol} ({result.get('error','')}) — trying Yahoo Finance...")
-        result = fetch_yahoo_price(symbol)
+    """Fetch EOD price using Groww historical candles via nse_price module."""
+    from nse_price import fetch_nse_price
+    result = fetch_nse_price(symbol)
+    if "error" in result:
+        print(f"Price fetch failed for {symbol}: {result['error']}")
     return result
 
 
