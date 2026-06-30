@@ -7,12 +7,18 @@ Usage:
     python scanner.py --refresh-universe
 """
 import argparse
+import os
+import sys
 from datetime import datetime, timedelta
 
 import pandas as pd
 from tqdm import tqdm
 
 import config
+
+# Disable tqdm's fancy terminal control on non-TTY environments (Railway) —
+# colorama can recurse infinitely trying to render progress bars there.
+TQDM_DISABLE = not sys.stdout.isatty()
 import indicators
 import risk
 import strategies
@@ -41,7 +47,7 @@ def run_scan(refresh_universe: bool = False) -> pd.DataFrame:
     all_signals = []
     failures = []
 
-    for stock in tqdm(universe, desc="Scanning NIFTY 500"):
+    for stock in tqdm(universe, desc="Scanning NIFTY 500", disable=TQDM_DISABLE, mininterval=10.0):
         symbol = stock["symbol"]
         try:
             df = fetch_history(client, symbol)
@@ -83,6 +89,7 @@ def run_scan(refresh_universe: bool = False) -> pd.DataFrame:
     # Save to Google Sheets Signals tab (primary store — survives Railway redeploys)
     try:
         from sheets import get_client, sync_signals
+        import config
         client   = get_client()
         workbook = client.open_by_key(config.GOOGLE_SHEET_ID)
         sync_signals(workbook, df=results_df)
