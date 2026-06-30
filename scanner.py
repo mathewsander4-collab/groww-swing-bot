@@ -7,18 +7,12 @@ Usage:
     python scanner.py --refresh-universe
 """
 import argparse
-import os
 import sys
 from datetime import datetime, timedelta
 
 import pandas as pd
-from tqdm import tqdm
 
 import config
-
-# Disable tqdm's fancy terminal control on non-TTY environments (Railway) —
-# colorama can recurse infinitely trying to render progress bars there.
-TQDM_DISABLE = not sys.stdout.isatty()
 import indicators
 import risk
 import strategies
@@ -46,9 +40,13 @@ def run_scan(refresh_universe: bool = False) -> pd.DataFrame:
 
     all_signals = []
     failures = []
+    total = len(universe)
 
-    for stock in tqdm(universe, desc="Scanning NIFTY 500", disable=TQDM_DISABLE, mininterval=10.0):
+    for i, stock in enumerate(universe):
         symbol = stock["symbol"]
+        # Simple progress print every 50 symbols — no tqdm/colorama (crashes on Railway)
+        if i % 50 == 0:
+            print(f"Scanning {i}/{total}...", flush=True)
         try:
             df = fetch_history(client, symbol)
             if not passes_liquidity_filter(df):
@@ -61,8 +59,10 @@ def run_scan(refresh_universe: bool = False) -> pd.DataFrame:
         except Exception as e:
             failures.append((symbol, str(e)))
 
+    print(f"Scan complete: {total}/{total}")
+
     if failures:
-        print(f"\n{len(failures)} symbols failed (first 5): {failures[:5]}")
+        print(f"{len(failures)} symbols failed (first 5): {failures[:5]}")
 
     if not all_signals:
         print("No setups found today.")
@@ -89,11 +89,10 @@ def run_scan(refresh_universe: bool = False) -> pd.DataFrame:
     # Save to Google Sheets Signals tab (primary store — survives Railway redeploys)
     try:
         from sheets import get_client, sync_signals
-        import config
         client   = get_client()
         workbook = client.open_by_key(config.GOOGLE_SHEET_ID)
         sync_signals(workbook, df=results_df)
-        print("✅ Signals saved to Google Sheets")
+        print("Signals saved to Google Sheets")
     except Exception as e:
         print(f"Sheets signals save failed: {e}")
 
@@ -111,11 +110,9 @@ def print_report(df: pd.DataFrame):
     print("\n" + "=" * 100)
     print(f"SWING SETUPS — {datetime.now().strftime('%Y-%m-%d')}  (capital: Rs.{config.CAPITAL:,.0f})")
     print("=" * 100)
-    try:
-        from tabulate import tabulate
-        print(tabulate(display_df, headers="keys", tablefmt="psql", showindex=False))
-    except ImportError:
-        print(display_df.to_string(index=False))
+    # Use plain to_string instead of tabulate — tabulate/colorama can crash on Railway's
+    # non-TTY log stream with infinite recursion.
+    print(display_df.to_string(index=False))
 
 
 if __name__ == "__main__":
