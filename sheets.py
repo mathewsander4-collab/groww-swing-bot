@@ -183,10 +183,15 @@ def sync_signals(workbook, df: pd.DataFrame = None):
         pattern = os.path.join(config.DATA_DIR, "scan_*.csv")
         files   = sorted(glob.glob(pattern))
         if not files:
-            print("No scan files found.")
+            print("No scan files found — leaving existing Signals sheet untouched.")
             return
         latest    = files[-1]
-        scan_date = os.path.basename(latest).replace("scan_", "").replace(".csv", "")
+        file_date = os.path.basename(latest).replace("scan_", "").replace(".csv", "")
+        if file_date != scan_date:
+            print(f"⚠️ Latest local scan file is from {file_date}, not today ({scan_date}) "
+                  f"— skipping sync to avoid overwriting Sheets with stale data.")
+            return
+        scan_date = file_date
         df        = pd.read_csv(latest)
 
     if df is None or df.empty:
