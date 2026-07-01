@@ -312,6 +312,20 @@ def sync_all(price_data: dict = None, scan_results: pd.DataFrame = None):
         sync_signals(workbook, df=scan_results)  # pass df directly — no CSV needed
         sync_summary(workbook)
 
+        # Daily P&L — today's closed-trade P&L + current open position count
+        positions = pt.load_positions()
+        log_file  = os.path.join(config.DATA_DIR, "live_trade_log.json")
+        trades    = []
+        if os.path.exists(log_file):
+            with open(log_file) as f:
+                trades = json.load(f)
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_closed_pnl = sum(
+            t.get("pnl", 0) for t in trades if t.get("exit_date") == today_str
+        )
+        sync_daily_pnl(workbook, today_str, today_closed_pnl, len(positions))
+
         sheet_url = f"https://docs.google.com/spreadsheets/d/{config.GOOGLE_SHEET_ID}"
         print(f"\n✅ All data synced to Google Sheets!")
         print(f"   View: {sheet_url}")
