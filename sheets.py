@@ -146,66 +146,22 @@ def sync_positions(workbook, price_data: dict = None):
 
 
 def sync_trade_log(workbook):
-    """Sync closed trades history to Trade Log sheet."""
+    """Verify Trade Log sheet — no longer clears/rewrites.
+
+    Trade Log is already kept up to date in real-time by
+    position_tracker.py's log_trade(), which appends one row per closed
+    trade directly to Sheets (the durable source, unlike local JSON which
+    can be wiped on a Railway redeploy). This function just ensures the
+    tab exists and reports current row count — it does not touch existing data.
+    """
     headers = [
-        "Symbol", "Strategy", "Entry Date", "Exit Date",
-        "Entry ₹", "Exit ₹", "Shares", "P&L ₹", "P&L %", "Exit Reason"
+        "symbol", "strategy", "entry", "exit_price", "shares",
+        "entry_date", "exit_date", "exit_reason", "pnl"
     ]
     sheet = get_or_create_sheet(workbook, TAB_TRADE_LOG, headers)
 
-    log_file = os.path.join(config.DATA_DIR, "live_trade_log.json")
-    if not os.path.exists(log_file):
-        print("No trade log found yet.")
-        return
-
-    with open(log_file) as f:
-        trades = json.load(f)
-
-    if not trades:
-        return
-
-    sheet.clear()
-    sheet.append_row(headers)
-
-    rows = []
-    total_pnl = 0
-    for t in trades:
-        entry     = t.get("entry", 0)
-        exit_price = t.get("exit_price", 0)
-        shares    = t.get("shares", 0)
-        pnl       = t.get("pnl", (exit_price - entry) * shares)
-        pnl_pct   = ((exit_price - entry) / entry * 100) if entry else 0
-        total_pnl += pnl
-
-        rows.append([
-            t.get("symbol", ""),
-            t.get("strategy", ""),
-            t.get("entry_date", ""),
-            t.get("exit_date", ""),
-            round(entry, 2),
-            round(exit_price, 2),
-            shares,
-            round(pnl, 0),
-            f"{pnl_pct:+.1f}%",
-            t.get("exit_reason", "")
-        ])
-
-    if rows:
-        sheet.append_rows(rows)
-
-    # Summary
-    wins   = [t for t in trades if t.get("pnl", 0) > 0]
-    losses = [t for t in trades if t.get("pnl", 0) <= 0]
-    sheet.append_row([])
-    sheet.append_row([
-        "TOTAL", "", "", "",
-        "", "", "",
-        round(total_pnl, 0),
-        "",
-        f"Wins: {len(wins)} | Losses: {len(losses)} | Win rate: {len(wins)/len(trades)*100:.1f}%" if trades else ""
-    ])
-
-    print(f"✅ Trade log synced ({len(trades)} trades)")
+    existing = sheet.get_all_records()
+    print(f"✅ Trade log verified ({len(existing)} trades already in Sheets — no rewrite)")
 
 
 def sync_signals(workbook, df: pd.DataFrame = None):
