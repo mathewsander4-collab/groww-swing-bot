@@ -9,6 +9,22 @@ Schedule:
   3:45 PM  → EOD report + scan + sync sheets
   9:00 PM  → Evening sync (prices + sheets)
 """
+import sys
+
+# Must run BEFORE any other imports that might trigger colorama
+# (growwapi or click can pull it in transitively; on Railway's non-TTY
+# stdout it causes infinite recursion in ansitowin32.write)
+try:
+    import colorama
+    colorama.init = lambda *a, **k: None
+    colorama.deinit = lambda *a, **k: None
+    if hasattr(sys.stdout, "reset"):
+        sys.stdout = sys.__stdout__
+    if hasattr(sys.stderr, "reset"):
+        sys.stderr = sys.__stderr__
+except ImportError:
+    pass
+
 import os
 import time
 from datetime import datetime, date
