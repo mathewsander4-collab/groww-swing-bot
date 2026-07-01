@@ -71,18 +71,25 @@ def run_scan(refresh_universe: bool = False) -> pd.DataFrame:
     signals_df = pd.DataFrame(all_signals).sort_values("score", ascending=False)
 
     sized_rows = []
-    open_count = 0
+    capital_deployed = 0.0
+    max_capital      = config.CAPITAL * (config.MAX_CAPITAL_DEPLOYED_PCT / 100)
+
     for _, row in signals_df.iterrows():
-        if open_count >= config.MAX_OPEN_POSITIONS:
+        if capital_deployed >= max_capital:
             break
         sizing = risk.position_size(config.CAPITAL, row["entry"], row["stop"], config)
         if sizing["shares"] <= 0:
+            continue
+        # Skip if this trade would exceed the capital limit
+        if capital_deployed + sizing["capital_used"] > max_capital:
             continue
         r = row.to_dict()
         r.update(sizing)
         r["risk_pct"] = (sizing["risk_amount"] / config.CAPITAL) * 100
         sized_rows.append(r)
-        open_count += 1
+        capital_deployed += sizing["capital_used"]
+
+    print(f"Capital deployed: ₹{capital_deployed:,.0f} / ₹{max_capital:,.0f} ({capital_deployed/config.CAPITAL*100:.1f}%)")
 
     results_df = pd.DataFrame(sized_rows)
 

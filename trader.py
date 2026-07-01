@@ -133,8 +133,11 @@ def execute_signals(signals: list, sentiment: dict):
             print(f"Already holding {symbol} — skipping")
             continue
 
-        if len(open_positions) + len(executed) >= config.MAX_OPEN_POSITIONS:
-            print(f"Max positions reached — skipping {symbol}")
+        # Check capital limit (70% of total capital)
+        max_capital      = config.CAPITAL * (config.MAX_CAPITAL_DEPLOYED_PCT / 100)
+        capital_deployed = sum(p["entry"] * p["shares"] for p in open_positions) +                           sum(float(e["entry"]) * int(e.get("shares", 0)) for e in executed)
+        if capital_deployed >= max_capital:
+            print(f"Capital limit reached ({capital_deployed/config.CAPITAL*100:.1f}%) — skipping {symbol}")
             break
 
         if shares <= 0:

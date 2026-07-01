@@ -35,7 +35,8 @@ PAPER_TRADE               = os.environ.get("PAPER_TRADE", "true").lower() == "tr
 CAPITAL                   = float(os.environ.get("CAPITAL", "100000"))
 RISK_PER_TRADE_PCT        = 1.0
 MAX_CAPITAL_PER_TRADE_PCT = 20.0
-MAX_OPEN_POSITIONS        = 8
+MAX_CAPITAL_DEPLOYED_PCT  = 70.0   # stop opening new positions after 70% capital used
+MAX_OPEN_POSITIONS        = 99     # no hard count limit — capital limit controls instead
 REWARD_RISK_RATIO         = 2.0
 
 # Universe
