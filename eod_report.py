@@ -62,13 +62,20 @@ def evaluate_position(pos: dict, price_data: dict) -> dict:
     risk    = (entry - stop) * shares
     reward  = (target - entry) * shares
 
-    if low <= stop:
-        status     = "🛑 STOP HIT"
-        actual_pnl = (stop - entry) * shares
-    elif high >= target:
-        status     = "🎯 TARGET HIT"
-        actual_pnl = (target - entry) * shares
-    elif close > entry:
+    # NOTE: every position reaching this point came straight from
+    # pt.load_positions() — i.e. it is CONFIRMED still open right now.
+    # exit_manager.py is the only thing that actually closes positions
+    # (via pt.remove_position()), and it does so live, intraday, using
+    # the stop/target level AT THE MOMENT price crossed it.
+    #
+    # Comparing today's full day-range (high/low) against the CURRENT
+    # stop/target here is unreliable: a trailing stop moves during the
+    # day, so a low that occurred BEFORE the stop trailed up can look
+    # like a "stop hit" even though the real stop was lower at that time
+    # and was never actually breached. So status here must only ever
+    # reflect where the CLOSE price is relative to entry — never a
+    # same-day reconstruction of stop/target hits.
+    if close > entry:
         status     = "🟢 IN PROFIT"
         actual_pnl = pnl
     elif close < entry:
@@ -79,11 +86,7 @@ def evaluate_position(pos: dict, price_data: dict) -> dict:
         actual_pnl = 0
 
     notes = []
-    if high >= target:
-        notes.append("✅ Target was hit during the day — excellent!")
-    elif low <= stop:
-        notes.append("❌ Stop was hit — capital preserved.")
-    elif close > entry and close > price_data.get("open", close):
+    if close > entry and close > price_data.get("open", close):
         notes.append("✅ Closed above entry with green candle — momentum continuing.")
     elif close < entry and close < price_data.get("open", close):
         notes.append("⚠️  Closed below entry with red candle — watch closely tomorrow.")
@@ -91,6 +94,10 @@ def evaluate_position(pos: dict, price_data: dict) -> dict:
         notes.append("✅ Above entry — holding in profit zone.")
     else:
         notes.append("⚠️  Below entry — monitor stop level carefully.")
+    if high >= target:
+        notes.append("ℹ️  Target level was touched intraday but position remains open — check exit_manager logs for why.")
+    if low <= stop:
+        notes.append("ℹ️  Today's low dipped at/below the CURRENT stop level, but position remains open — this can happen if the stop trailed up after the low occurred, not necessarily a bug.")
 
     pct_to_target = (target - close) / close * 100
     pct_to_stop   = (close - stop)   / close * 100
@@ -136,8 +143,6 @@ def generate_report() -> str:
 
     winners = [e for e in evaluations if e["pnl"] > 0]
     losers  = [e for e in evaluations if e["pnl"] < 0]
-    stopped = [e for e in evaluations if "STOP"   in e["status"]]
-    targets = [e for e in evaluations if "TARGET" in e["status"]]
 
     lines = []
     lines.append("=" * 65)
@@ -145,13 +150,12 @@ def generate_report() -> str:
     lines.append(f"Mode: {'PAPER TRADE' if config.PAPER_TRADE else 'LIVE TRADE'}")
     lines.append("=" * 65)
     lines.append(f"\n📊 SUMMARY")
-    lines.append(f"  Total positions : {len(evaluations)}")
-    lines.append(f"  In profit       : {len(winners)}")
-    lines.append(f"  In loss         : {len(losers)}")
-    lines.append(f"  Stops hit       : {len(stopped)}")
-    lines.append(f"  Targets hit     : {len(targets)}")
-    lines.append(f"  Total P&L       : ₹{total_pnl:+,.0f}")
-    lines.append(f"  P&L %           : {total_pnl/config.CAPITAL*100:+.2f}%")
+    lines.append(f"  Total open positions : {len(evaluations)}")
+    lines.append(f"  In profit            : {len(winners)}")
+    lines.append(f"  In loss              : {len(losers)}")
+    lines.append(f"  Total unrealized P&L : ₹{total_pnl:+,.0f}")
+    lines.append(f"  P&L %                : {total_pnl/config.CAPITAL*100:+.2f}%")
+    lines.append(f"  (Closed trades — stops/targets hit today — are tracked in the Trade Log, not here.)")
 
     lines.append(f"\n{'─'*65}")
     lines.append("POSITION DETAILS (best to worst)")
@@ -177,8 +181,6 @@ def generate_report() -> str:
             lines.append("   More winners than losers — strategy working well.")
     elif total_pnl < 0:
         lines.append(f"⚠️  Difficult day. Portfolio down ₹{abs(total_pnl):,.0f}")
-        if stopped:
-            lines.append(f"   {len(stopped)} stop(s) hit — losses controlled.")
         lines.append("   Stay disciplined — one bad day doesn't define the strategy.")
     else:
         lines.append("⚪ Flat day — positions consolidating.")
