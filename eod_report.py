@@ -7,12 +7,20 @@ Usage:
 """
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 import config
 import position_tracker as pt
 from notifier import send_email
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def ist_now() -> datetime:
+    """Current time in IST, regardless of server timezone (Railway runs UTC)."""
+    return datetime.now(IST)
 
 
 def fetch_price(symbol: str) -> dict:
@@ -89,7 +97,11 @@ def evaluate_position(pos: dict, price_data: dict) -> dict:
     notes.append(f"📍 To target: {pct_to_target:.1f}% | To stop: {pct_to_stop:.1f}%")
     notes.append(f"📊 Volume: {price_data.get('volume', 0):,} | Source: {source}")
     notes.append(f"📈 Day range: ₹{low:.2f} — ₹{high:.2f}")
-    notes.append(f"⚖️  Risk: ₹{risk:,.0f} | Reward: ₹{reward:,.0f} | R:R = 1:{reward/abs(risk):.1f}")
+    if abs(risk) > 0:
+        rr_text = f"1:{reward/abs(risk):.1f}"
+    else:
+        rr_text = "n/a (breakeven stop)"
+    notes.append(f"⚖️  Risk: ₹{risk:,.0f} | Reward: ₹{reward:,.0f} | R:R = {rr_text}")
 
     return {
         "symbol": symbol, "strategy": strategy,
@@ -129,7 +141,7 @@ def generate_report() -> str:
 
     lines = []
     lines.append("=" * 65)
-    lines.append(f"END OF DAY REPORT — {datetime.now().strftime('%Y-%m-%d')}")
+    lines.append(f"END OF DAY REPORT — {ist_now().strftime('%Y-%m-%d')}")
     lines.append(f"Mode: {'PAPER TRADE' if config.PAPER_TRADE else 'LIVE TRADE'}")
     lines.append("=" * 65)
     lines.append(f"\n📊 SUMMARY")
@@ -180,14 +192,14 @@ if __name__ == "__main__":
 
     report_path = os.path.join(
         config.DATA_DIR,
-        f"eod_report_{datetime.now().strftime('%Y%m%d')}.txt"
+        f"eod_report_{ist_now().strftime('%Y%m%d')}.txt"
     )
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)
     print(f"\nReport saved to {report_path}")
     print("Sending email...")
     send_email(
-        subject=f"EOD Report — {datetime.now().strftime('%Y-%m-%d')}",
+        subject=f"EOD Report — {ist_now().strftime('%Y-%m-%d')}",
         body=report
     )
     print("Done!")

@@ -20,6 +20,7 @@ import glob
 import os
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -27,6 +28,13 @@ import config
 import notifier
 import position_tracker as pt
 from groww_client import GrowwClient
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def ist_now() -> datetime:
+    """Current time in IST, regardless of server timezone (Railway runs UTC)."""
+    return datetime.now(IST)
 
 
 def load_latest_signals(signals_df: pd.DataFrame = None) -> list:
@@ -112,7 +120,7 @@ def execute_signals(signals: list, sentiment: dict):
             msg += f"  {c['message']}\n"
         print(msg)
         notifier.send_email(
-            subject=f"[BOT] No Trades Today — {datetime.now().strftime('%Y-%m-%d')}",
+            subject=f"[BOT] No Trades Today — {ist_now().strftime('%Y-%m-%d')}",
             body=msg
         )
         return
@@ -232,7 +240,7 @@ def run_morning_session(sentiment: dict = None, size_multiplier: float = None, s
         signals_df:       Scanner results as DataFrame (avoids CSV filesystem dependency).
     """
     print(f"\n{'='*60}")
-    print(f"SWING BOT — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"SWING BOT — {ist_now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Mode: {'PAPER TRADE' if config.PAPER_TRADE else '⚠️ LIVE TRADE'}")
     print(f"{'='*60}\n")
 

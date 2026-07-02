@@ -1,6 +1,14 @@
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import config
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def ist_now() -> datetime:
+    """Current time in IST, regardless of server timezone (Railway runs UTC)."""
+    return datetime.now(IST)
 
 
 def send_email(subject: str, body: str) -> bool:
@@ -40,7 +48,7 @@ def notify_error(context, error=None) -> None:
         body    = (
             f"SwingBot encountered an error.\n\n"
             f"Error : {context}\n"
-            f"Time  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
+            f"Time  : {ist_now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
         )
     else:
         subject = f"[SwingBot ERROR] {context}"
@@ -48,7 +56,7 @@ def notify_error(context, error=None) -> None:
             f"SwingBot encountered an error.\n\n"
             f"Context : {context}\n"
             f"Error   : {type(error).__name__}: {error}\n"
-            f"Time    : {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
+            f"Time    : {ist_now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
         )
     send_email(subject, body)
 
@@ -58,9 +66,10 @@ def notify_order_placed(symbol: str, entry: float, stop: float,
     """Send trade entry notification."""
     risk    = (entry - stop) * shares
     reward  = (target - entry) * shares
+    rr_text = f"1:{reward/abs(risk):.1f}" if abs(risk) > 0 else "n/a"
     subject = f"[SwingBot] BUY — {symbol}"
     body    = (
-        f"Order Placed — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        f"Order Placed — {ist_now().strftime('%Y-%m-%d %H:%M')}\n\n"
         f"Symbol   : {symbol}\n"
         f"Strategy : {strategy}\n"
         f"Shares   : {shares}\n"
@@ -69,7 +78,7 @@ def notify_order_placed(symbol: str, entry: float, stop: float,
         f"Target   : ₹{target:.2f}\n"
         f"Risk     : ₹{risk:,.0f}\n"
         f"Reward   : ₹{reward:,.0f}\n"
-        f"R:R      : 1:{reward/abs(risk):.1f}\n"
+        f"R:R      : {rr_text}\n"
         f"Mode     : {'PAPER' if config.PAPER_TRADE else 'LIVE'}\n"
     )
     send_email(subject, body)
@@ -79,10 +88,10 @@ def notify_exit(symbol: str, entry: float, exit_price: float,
                 shares: int, reason: str) -> None:
     """Send trade exit notification."""
     pnl     = (exit_price - entry) * shares
-    pnl_pct = (exit_price - entry) / entry * 100
+    pnl_pct = (exit_price - entry) / entry * 100 if entry else 0
     subject = f"[SwingBot] EXIT — {symbol} | ₹{pnl:+,.0f}"
     body    = (
-        f"Position Closed — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        f"Position Closed — {ist_now().strftime('%Y-%m-%d %H:%M')}\n\n"
         f"Symbol     : {symbol}\n"
         f"Entry      : ₹{entry:.2f}\n"
         f"Exit       : ₹{exit_price:.2f}\n"
@@ -96,10 +105,10 @@ def notify_exit(symbol: str, entry: float, exit_price: float,
 
 def notify_daily_summary(executed: list, all_positions: list) -> None:
     """Send morning summary — orders placed + current open positions."""
-    subject = f"[SwingBot] Morning Summary — {datetime.now().strftime('%Y-%m-%d')}"
+    subject = f"[SwingBot] Morning Summary — {ist_now().strftime('%Y-%m-%d')}"
 
     lines = []
-    lines.append(f"SwingBot Morning Summary — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    lines.append(f"SwingBot Morning Summary — {ist_now().strftime('%Y-%m-%d %H:%M')}")
     lines.append(f"Mode: {'PAPER TRADE' if config.PAPER_TRADE else 'LIVE TRADE'}")
     lines.append("")
 
@@ -135,7 +144,7 @@ def notify_sentiment_skip(score: int, details: list) -> None:
         f"Sentiment check failed. No trades placed today.\n\n"
         f"Total Score : {score}\n\n"
         f"Breakdown:\n{lines}\n\n"
-        f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
+        f"Time: {ist_now().strftime('%Y-%m-%d %H:%M:%S IST')}\n"
     )
     send_email(subject, body)
 
@@ -144,5 +153,5 @@ def test_email() -> None:
     """Send a test email to verify setup."""
     send_email(
         subject="[SwingBot] Test Email",
-        body=f"SwingBot email is working!\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')}"
+        body=f"SwingBot email is working!\nTime: {ist_now().strftime('%Y-%m-%d %H:%M:%S IST')}"
     )
