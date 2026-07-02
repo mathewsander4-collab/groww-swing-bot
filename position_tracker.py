@@ -7,14 +7,23 @@ Falls back to local JSON if Sheets is unavailable.
 import json
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import config
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def ist_now() -> datetime:
+    """Current time in IST, regardless of server timezone (Railway runs UTC)."""
+    return datetime.now(IST)
+
 
 POSITIONS_FILE = os.path.join(config.DATA_DIR, "open_positions.json")
 TRADE_LOG_FILE = os.path.join(config.DATA_DIR, "live_trade_log.json")
 
 POSITIONS_HEADERS = [
-    "symbol", "entry", "stop", "target", "shares",
+    "symbol", "entry", "stop", "initial_stop", "target", "shares",
     "strategy", "order_id", "entry_date", "entry_time"
 ]
 
@@ -51,16 +60,26 @@ def _sheet_to_positions(sheet) -> list:
         if not row.get("symbol"):
             continue
         try:
+            # initial_stop is the ORIGINAL stop set at entry — used for R-multiple
+            # math and must never be overwritten by trailing logic. Legacy rows
+            # created before this field existed won't have it: leave as None
+            # rather than guessing, so exit_manager.py can decide how to handle
+            # "unknown" explicitly instead of silently freezing on a fabricated
+            # value.
+            raw_initial_stop = row.get("initial_stop", "")
+            initial_stop = float(raw_initial_stop) if str(raw_initial_stop).strip() else None
+
             positions.append({
-                "symbol":     str(row["symbol"]),
-                "entry":      float(row["entry"]),
-                "stop":       float(row["stop"]),
-                "target":     float(row["target"]),
-                "shares":     int(row["shares"]),
-                "strategy":   str(row.get("strategy", "")),
-                "order_id":   str(row.get("order_id", "PAPER")),
-                "entry_date": str(row.get("entry_date", "")),
-                "entry_time": str(row.get("entry_time", "")),
+                "symbol":       str(row["symbol"]),
+                "entry":        float(row["entry"]),
+                "stop":         float(row["stop"]),
+                "initial_stop": initial_stop,
+                "target":       float(row["target"]),
+                "shares":       int(row["shares"]),
+                "strategy":     str(row.get("strategy", "")),
+                "order_id":     str(row.get("order_id", "PAPER")),
+                "entry_date":   str(row.get("entry_date", "")),
+                "entry_time":   str(row.get("entry_time", "")),
             })
         except Exception as e:
             print(f"[PT] Skipping bad row {row}: {e}")
@@ -72,8 +91,11 @@ def _positions_to_sheet(sheet, positions: list):
     sheet.clear()
     sheet.append_row(POSITIONS_HEADERS)
     for p in positions:
+        initial_stop = p.get("initial_stop")
         sheet.append_row([
-            p["symbol"], p["entry"], p["stop"], p["target"], p["shares"],
+            p["symbol"], p["entry"], p["stop"],
+            initial_stop if initial_stop is not None else "",
+            p["target"], p["shares"],
             p.get("strategy", ""), p.get("order_id", "PAPER"),
             p.get("entry_date", ""), p.get("entry_time", "")
         ])
@@ -113,15 +135,16 @@ def add_position(symbol: str, entry: float, stop: float,
         print(f"Position already exists for {symbol} — skipping")
         return
     positions.append({
-        "symbol":     symbol,
-        "entry":      entry,
-        "stop":       stop,
-        "target":     target,
-        "shares":     shares,
-        "strategy":   strategy,
-        "order_id":   order_id,
-        "entry_date": datetime.now().strftime("%Y-%m-%d"),
-        "entry_time": datetime.now().strftime("%H:%M:%S"),
+        "symbol":       symbol,
+        "entry":        entry,
+        "stop":         stop,
+        "initial_stop": stop,   # fixed anchor for R-multiple math — never changes
+        "target":       target,
+        "shares":       shares,
+        "strategy":     strategy,
+        "order_id":     order_id,
+        "entry_date":   ist_now().strftime("%Y-%m-%d"),
+        "entry_time":   ist_now().strftime("%H:%M:%S"),
     })
     save_positions(positions)
     print(f"Position added: {symbol} — {shares} shares @ ₹{entry:.2f}")
@@ -139,7 +162,7 @@ def remove_position(symbol: str, exit_price: float, reason: str):
     log_trade({
         **pos,
         "exit_price":  exit_price,
-        "exit_date":   datetime.now().strftime("%Y-%m-%d"),
+        "exit_date":   ist_now().strftime("%Y-%m-%d"),
         "exit_reason": reason,
         "pnl":         pnl,
     })

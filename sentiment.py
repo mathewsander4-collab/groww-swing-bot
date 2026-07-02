@@ -95,9 +95,16 @@ def check_nifty(indices: list) -> tuple:
 
 
 def check_advance_decline(indices: list) -> tuple:
-    """Check A/D ratio from Nifty 50 data."""
+    """Check A/D ratio using NIFTY 500 breadth — matches the bot's actual
+    trading universe (scanner.py screens NIFTY 500, not just the 50
+    largest-cap names). Falls back to NIFTY 50 only if NIFTY 500 data
+    isn't available from the NSE API that day."""
     try:
-        idx = find_index(indices, "NIFTY 50")
+        idx = find_index(indices, "NIFTY 500")
+        source_label = "NIFTY 500"
+        if not idx:
+            idx = find_index(indices, "NIFTY 50")
+            source_label = "NIFTY 50 (fallback — NIFTY 500 unavailable)"
         if not idx:
             return 0, "A/D: Not found — skipping"
 
@@ -110,11 +117,11 @@ def check_advance_decline(indices: list) -> tuple:
         ratio = advances / declines
 
         if ratio >= AD_GREEN:
-            return 1, f"A/D: {ratio:.2f} ✅ ({int(advances)} up / {int(declines)} down)"
+            return 1, f"A/D ({source_label}): {ratio:.2f} ✅ ({int(advances)} up / {int(declines)} down)"
         elif ratio >= AD_RED:
-            return 0, f"A/D: {ratio:.2f} ⚠️ Mixed ({int(advances)} up / {int(declines)} down)"
+            return 0, f"A/D ({source_label}): {ratio:.2f} ⚠️ Mixed ({int(advances)} up / {int(declines)} down)"
         else:
-            return -2, f"A/D: {ratio:.2f} ❌ Mostly falling ({int(advances)} up / {int(declines)} down)"
+            return -2, f"A/D ({source_label}): {ratio:.2f} ❌ Mostly falling ({int(advances)} up / {int(declines)} down)"
     except Exception as e:
         return 0, f"A/D: Error ({e}) — skipping"
 

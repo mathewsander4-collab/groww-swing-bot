@@ -70,12 +70,21 @@ def trading_days_held(entry_date_str: str) -> int:
         return 0
 
 
-def calculate_new_stop(entry: float, stop: float, current_price: float) -> tuple:
+def calculate_new_stop(entry: float, initial_stop: float, stop: float, current_price: float) -> tuple:
     """
     Calculate new trailing stop based on R milestones.
+
+    IMPORTANT: R-multiples must be calculated from the ORIGINAL stop
+    (initial_stop) set at entry, NOT the current live stop. The live
+    `stop` moves as trailing progresses (e.g. to breakeven at 0.5R) —
+    if R were recalculated from that moved stop, risk_per_share would
+    become 0 the moment stop reaches entry, and every future milestone
+    (1.0R, 1.5R, 2.0R) would be permanently unreachable. This was a real
+    bug: positions that hit breakeven never trailed any further.
+
     Returns (new_stop, milestone_label) or (None, None) if no update needed.
     """
-    risk_per_share = entry - stop
+    risk_per_share = entry - initial_stop
     if risk_per_share <= 0:
         return None, None
 
@@ -106,11 +115,26 @@ def calculate_new_stop(entry: float, stop: float, current_price: float) -> tuple
 
 def check_trailing_stop(pos: dict, current_price: float, dry_run: bool = False) -> dict:
     """Update trailing stop if price has moved to a new milestone."""
-    symbol = pos["symbol"]
-    entry  = pos["entry"]
-    stop   = pos["stop"]
+    symbol       = pos["symbol"]
+    entry        = pos["entry"]
+    stop         = pos["stop"]
+    initial_stop = pos.get("initial_stop")
 
-    new_stop, label = calculate_new_stop(entry, stop, current_price)
+    if initial_stop is None:
+        # Legacy position created before initial_stop existed — the
+        # original risk is genuinely unrecoverable. Falling back to the
+        # current stop reproduces the old frozen-at-breakeven behavior
+        # for THIS position only (new positions are unaffected), and we
+        # deliberately do NOT persist this fallback back into storage
+        # (see position_tracker.py) so it stays visibly "unknown" rather
+        # than looking like a real value.
+        print(f"  ⚠️  {symbol}: no initial_stop on record (legacy position) — "
+              f"trailing math falls back to current stop, may already be frozen. "
+              f"Set Positions_DB!initial_stop for this row manually if you know "
+              f"the original stop.")
+        initial_stop = stop
+
+    new_stop, label = calculate_new_stop(entry, initial_stop, stop, current_price)
     if new_stop is None:
         return None
 
@@ -203,6 +227,61 @@ def check_time_exit(pos: dict, current_price: float, dry_run: bool = False) -> b
     return True
 
 
+def check_intraday_market_stress() -> dict:
+    """Re-run the same sentiment scoring used at market open, but mid-day.
+    Returns the sentiment result dict, or None if the check couldn't run
+    (e.g. NSE API unavailable) — callers should treat None as 'no change,
+    don't act on it' rather than assuming stress.
+
+    This only READS sentiment — it never blocks new entries (that's
+    trader.py's job at 9:10-9:30 AM only). It exists purely so open
+    positions can react to a market-wide deterioration that happens
+    AFTER the morning entry window, which nothing currently checks for.
+    """
+    try:
+        from sentiment import run_sentiment_check
+        return run_sentiment_check()
+    except Exception as e:
+        print(f"  [SENTIMENT] Intraday check failed: {e} — skipping stress tightening this cycle")
+        return None
+
+
+def apply_sentiment_stop_tightening(pos: dict, current_price: float, dry_run: bool = False) -> bool:
+    """If market sentiment has deteriorated to SKIP level mid-day, raise
+    the stop to breakeven (entry) — but ONLY for a position that is
+    currently trading ABOVE entry (i.e. actually in profit right now).
+
+    This is deliberately conservative: a position sitting below entry is
+    still within its planned, pre-agreed risk (that's what the original
+    stop is for) — forcing its stop up to breakeven while price is still
+    below entry would trigger an immediate stop-out at today's price,
+    turning a normal in-progress trade into a forced loss. That is NOT
+    what this feature is for. It only locks in gains that already exist,
+    it never manufactures a loss that wasn't already going to happen.
+
+    Returns True if this position's stop was tightened.
+    """
+    symbol = pos["symbol"]
+    entry  = pos["entry"]
+    stop   = pos["stop"]
+
+    if current_price <= entry:
+        return False   # not currently in profit — leave existing stop alone
+    if stop >= entry:
+        return False    # already at/above breakeven — nothing to floor
+
+    new_stop = entry
+    print(f"  ⚠️  SENTIMENT TIGHTEN {symbol}: stop {stop:.2f} → {new_stop:.2f} (breakeven floor — market stress)")
+    if not dry_run:
+        all_positions = pt.load_positions()
+        for p in all_positions:
+            if p["symbol"] == symbol:
+                p["stop"] = new_stop
+        pt.save_positions(all_positions)
+    return True
+
+
+
 def run_exit_checks(dry_run: bool = False, prices: dict = None):
     """
     Run all exit checks on open positions.
@@ -228,10 +307,22 @@ def run_exit_checks(dry_run: bool = False, prices: dict = None):
     print(f"Checking {len(positions)} positions...")
     print(f"{'='*60}")
 
-    trailing_updates = []
-    stop_exits       = []
-    target_exits     = []
-    time_exits       = []
+    # Intraday market stress check — reuses the same sentiment scoring
+    # used at 9:10-9:30 AM, but mid-day. Only ever tightens stops
+    # (never blocks/places trades — that stays trader.py's job only).
+    market_stressed = False
+    if getattr(config, "INTRADAY_SENTIMENT_CHECK", True):
+        sentiment_result = check_intraday_market_stress()
+        if sentiment_result and sentiment_result.get("decision") == "SKIP":
+            market_stressed = True
+            print(f"  ⚠️  Mid-day sentiment deteriorated: {sentiment_result.get('verdict')}")
+            print(f"  ⚠️  Tightening stops to breakeven on any position currently in profit.")
+
+    trailing_updates   = []
+    stop_exits         = []
+    target_exits       = []
+    time_exits         = []
+    sentiment_tightened = []
 
     for pos in positions:
         symbol = pos["symbol"]
@@ -267,7 +358,13 @@ def run_exit_checks(dry_run: bool = False, prices: dict = None):
             time_exits.append(symbol)
             continue
 
-        # 3. Trailing stop update
+        # 3. Mid-day market stress — floor stop at breakeven if in profit
+        if market_stressed:
+            if apply_sentiment_stop_tightening(pos, current_price, dry_run):
+                sentiment_tightened.append(symbol)
+
+        # 4. Trailing stop update (normal milestone logic still applies
+        #    on top of any sentiment floor — it can only improve on it)
         trail_update = check_trailing_stop(pos, current_price, dry_run)
         if trail_update:
             trailing_updates.append(trail_update)
@@ -278,9 +375,25 @@ def run_exit_checks(dry_run: bool = False, prices: dict = None):
     print(f"  Target exits           : {len(target_exits)}")
     print(f"  Trailing stops updated : {len(trailing_updates)}")
     print(f"  Time-based exits       : {len(time_exits)}")
+    if market_stressed:
+        print(f"  Sentiment tightenings  : {len(sentiment_tightened)} (mid-day market stress)")
     if dry_run:
         print(f"\n  DRY RUN — no changes made")
     print(f"{'='*60}")
+
+    if market_stressed and sentiment_tightened and not dry_run:
+        notifier.send_email(
+            subject=f"[SwingBot] Mid-Day Market Stress — Stops Tightened",
+            body=(
+                f"Mid-Day Sentiment Alert — {ist_now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"Market sentiment deteriorated to SKIP level during the day.\n"
+                f"Stops tightened to breakeven on {len(sentiment_tightened)} "
+                f"position(s) currently in profit:\n\n"
+                + "\n".join(f"  - {s}" for s in sentiment_tightened) +
+                f"\n\nThis only raises stops on profitable positions — it does not "
+                f"place, close, or block any trades.\n"
+            )
+        )
 
 
 if __name__ == "__main__":
