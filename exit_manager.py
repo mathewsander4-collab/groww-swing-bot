@@ -21,12 +21,20 @@ Usage:
 """
 import argparse
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import config
 import notifier
 import position_tracker as pt
 
 MAX_HOLDING_DAYS = 10
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def ist_now() -> datetime:
+    """Current time in IST, regardless of server timezone (Railway runs UTC)."""
+    return datetime.now(IST)
 
 # Trailing stop milestones: (R_multiple, lock_pct)
 TRAIL_MILESTONES = [
@@ -121,7 +129,7 @@ def check_trailing_stop(pos: dict, current_price: float, dry_run: bool = False) 
         notifier.send_email(
             subject=f"Trailing Stop Updated — {symbol}",
             body=(
-                f"Trailing Stop Updated — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"Trailing Stop Updated — {ist_now().strftime('%Y-%m-%d %H:%M')}\n\n"
                 f"Stock:         {symbol}\n"
                 f"Entry:         Rs.{entry:.2f}\n"
                 f"Current:       Rs.{current_price:.2f}\n"
@@ -183,7 +191,7 @@ def check_time_exit(pos: dict, current_price: float, dry_run: bool = False) -> b
         notifier.send_email(
             subject=f"Time Exit — {symbol} after {days_held} days",
             body=(
-                f"Time-Based Exit — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"Time-Based Exit — {ist_now().strftime('%Y-%m-%d %H:%M')}\n\n"
                 f"Stock:      {symbol}\n"
                 f"Entry:      Rs.{entry:.2f}\n"
                 f"Exit Price: Rs.{current_price:.2f}\n"
@@ -209,9 +217,14 @@ def run_exit_checks(dry_run: bool = False, prices: dict = None):
         print("No open positions to check.")
         return
 
-    mode = "DRY RUN" if dry_run else "LIVE"
+    if dry_run:
+        mode = "DRY RUN"
+    elif getattr(config, "PAPER_TRADE", True):
+        mode = "PAPER"
+    else:
+        mode = "LIVE"
     print(f"\n{'='*60}")
-    print(f"EXIT MANAGER — {datetime.now().strftime('%Y-%m-%d %H:%M')} [{mode}]")
+    print(f"EXIT MANAGER — {ist_now().strftime('%Y-%m-%d %H:%M')} [{mode}]")
     print(f"Checking {len(positions)} positions...")
     print(f"{'='*60}")
 
